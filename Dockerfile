@@ -32,11 +32,16 @@ CMD ["--transport", "sse"]
 
 FROM alpine:3.22 AS production
 
-RUN apk add --no-cache ca-certificates net-tools curl
+RUN apk add --no-cache ca-certificates
+
+RUN addgroup -S appgroup && adduser -S appuser -G appgroup
 
 COPY --from=build /go/bin/mcp-server /usr/local/bin/mcp-server
 
 WORKDIR /app
+RUN chown appuser:appgroup /app
+
+USER appuser
 
 EXPOSE 3001
 
