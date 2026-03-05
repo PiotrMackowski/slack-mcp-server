@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/csv"
+	"errors"
 	"fmt"
 	"regexp"
 	"strconv"
@@ -41,9 +42,16 @@ func setupTestEnv(t *testing.T) (*testEnv, func()) {
 	}
 
 	mcpServer, err := util.SetupMCP(cfg)
+	if errors.Is(err, util.ErrMissingEnvVar) {
+		t.Skipf("Skipping integration test: %v", err)
+	}
 	require.NoError(t, err, "Failed to set up MCP server")
 
 	fwd, err := util.SetupForwarding(context.Background(), "http://"+mcpServer.Host+":"+strconv.Itoa(mcpServer.Port))
+	if errors.Is(err, util.ErrMissingEnvVar) {
+		mcpServer.Shutdown()
+		t.Skipf("Skipping integration test: %v", err)
+	}
 	require.NoError(t, err, "Failed to set up ngrok forwarding")
 
 	sseURL := fmt.Sprintf("%s://%s/sse", fwd.URL.Scheme, fwd.URL.Host)

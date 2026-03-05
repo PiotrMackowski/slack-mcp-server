@@ -17,7 +17,7 @@ type Forwarding struct {
 func SetupForwarding(parentCtx context.Context, to string) (*Forwarding, error) {
 	authToken := os.Getenv("NGROK_AUTH_TOKEN")
 	if authToken == "" {
-		return nil, fmt.Errorf("NGROK_AUTH_TOKEN not set")
+		return nil, fmt.Errorf("%w: NGROK_AUTH_TOKEN not set", ErrMissingEnvVar)
 	}
 
 	ctx, cancel := context.WithCancel(parentCtx)
