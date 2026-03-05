@@ -570,8 +570,12 @@ func (s *MCPServer) ServeSSE(addr string) *server.SSEServer {
 		zap.String("commit_hash", version.CommitHash),
 		zap.String("address", addr),
 	)
+	baseURL := os.Getenv("SLACK_MCP_BASE_URL")
+	if baseURL == "" {
+		baseURL = fmt.Sprintf("http://%s", addr)
+	}
 	return server.NewSSEServer(s.server,
-		server.WithBaseURL(fmt.Sprintf("http://%s", addr)),
+		server.WithBaseURL(baseURL),
 		server.WithSSEContextFunc(func(ctx context.Context, r *http.Request) context.Context {
 			ctx = auth.AuthFromRequest(s.logger)(ctx, r)
 
@@ -633,7 +637,7 @@ func buildErrorRecoveryMiddleware(logger *zap.Logger) server.ToolHandlerMiddlewa
 func buildLoggerMiddleware(logger *zap.Logger) server.ToolHandlerMiddleware {
 	return func(next server.ToolHandlerFunc) server.ToolHandlerFunc {
 		return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-			logger.Info("Request received",
+			logger.Debug("Request received",
 				zap.String("tool", req.Params.Name),
 				zap.Any("params", req.Params),
 			)

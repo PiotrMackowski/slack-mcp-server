@@ -230,11 +230,11 @@ type MCPSlackClient struct {
 	authResponse *slack.AuthTestResponse
 	authProvider auth.Provider
 
-	isEnterprise  bool
-	isOAuth       bool
-	isBotToken    bool
-	edgeFailed    bool // set when edge API fails; subsequent calls skip straight to standard API
-	teamEndpoint  string
+	isEnterprise bool
+	isOAuth      bool
+	isBotToken   bool
+	edgeFailed   bool // set when edge API fails; subsequent calls skip straight to standard API
+	teamEndpoint string
 }
 
 type ApiProvider struct {
@@ -249,16 +249,16 @@ type ApiProvider struct {
 	// Users cache: atomic pointer to immutable snapshot (no copy on read)
 	usersSnapshot          atomic.Pointer[UsersCache]
 	usersCachePath         string
-	usersReady             bool
+	usersReady             atomic.Bool
 	lastForcedUsersRefresh time.Time
-	usersMu                sync.RWMutex // protects usersReady, lastForcedUsersRefresh
+	usersMu                sync.RWMutex // protects lastForcedUsersRefresh
 
 	// Channels cache: atomic pointer to immutable snapshot (no copy on read)
 	channelsSnapshot          atomic.Pointer[ChannelsCache]
 	channelsCachePath         string
-	channelsReady             bool
+	channelsReady             atomic.Bool
 	lastForcedChannelsRefresh time.Time
-	channelsMu                sync.RWMutex // protects channelsReady, lastForcedChannelsRefresh
+	channelsMu                sync.RWMutex // protects lastForcedChannelsRefresh
 }
 
 func NewMCPSlackClient(authProvider auth.Provider, logger *zap.Logger) (*MCPSlackClient, error) {
@@ -820,7 +820,7 @@ func (ap *ApiProvider) refreshUsersInternal(ctx context.Context, force bool) err
 					ap.logger.Info("Loaded users from cache",
 						zap.Int("count", len(cachedUsers)),
 						zap.String("cache_file", ap.usersCachePath))
-					ap.usersReady = true
+					ap.usersReady.Store(true)
 					return nil
 				}
 			}
@@ -878,7 +878,7 @@ func (ap *ApiProvider) refreshUsersInternal(ctx context.Context, force bool) err
 	if data, err := json.MarshalIndent(list, "", "  "); err != nil {
 		ap.logger.Error("Failed to marshal users for cache", zap.Error(err))
 	} else {
-		if err := os.WriteFile(ap.usersCachePath, data, 0644); err != nil {
+		if err := os.WriteFile(ap.usersCachePath, data, 0600); err != nil {
 			ap.logger.Error("Failed to write cache file",
 				zap.String("cache_file", ap.usersCachePath),
 				zap.Error(err))
@@ -889,7 +889,7 @@ func (ap *ApiProvider) refreshUsersInternal(ctx context.Context, force bool) err
 		}
 	}
 
-	ap.usersReady = true
+	ap.usersReady.Store(true)
 
 	return nil
 }
@@ -982,7 +982,7 @@ func (ap *ApiProvider) refreshChannelsInternal(ctx context.Context, force bool) 
 					ap.logger.Info("Loaded channels from cache and re-mapped DM names",
 						zap.Int("count", len(cachedChannels)),
 						zap.String("cache_file", ap.channelsCachePath))
-					ap.channelsReady = true
+					ap.channelsReady.Store(true)
 					return nil
 				}
 			}
@@ -998,7 +998,7 @@ func (ap *ApiProvider) refreshChannelsInternal(ctx context.Context, force bool) 
 	} else if data, err := json.MarshalIndent(channels, "", "  "); err != nil {
 		ap.logger.Error("Failed to marshal channels for cache", zap.Error(err))
 	} else {
-		if err := os.WriteFile(ap.channelsCachePath, data, 0644); err != nil {
+		if err := os.WriteFile(ap.channelsCachePath, data, 0600); err != nil {
 			ap.logger.Error("Failed to write cache file",
 				zap.String("cache_file", ap.channelsCachePath),
 				zap.Error(err))
@@ -1009,7 +1009,7 @@ func (ap *ApiProvider) refreshChannelsInternal(ctx context.Context, force bool) 
 		}
 	}
 
-	ap.channelsReady = true
+	ap.channelsReady.Store(true)
 
 	return nil
 }
@@ -1168,10 +1168,10 @@ func (ap *ApiProvider) ProvideChannelsMaps() *ChannelsCache {
 }
 
 func (ap *ApiProvider) IsReady() (bool, error) {
-	if !ap.usersReady {
+	if !ap.usersReady.Load() {
 		return false, ErrUsersNotReady
 	}
-	if !ap.channelsReady {
+	if !ap.channelsReady.Load() {
 		return false, ErrChannelsNotReady
 	}
 	return true, nil
@@ -1209,7 +1209,7 @@ func (ap *ApiProvider) SearchUsers(ctx context.Context, query string, limit int)
 // searchUsersInCache performs a case-insensitive regex search on cached users.
 // Matches against username, real name, display name, and email.
 func (ap *ApiProvider) searchUsersInCache(query string, limit int) ([]slack.User, error) {
-	if !ap.usersReady {
+	if !ap.usersReady.Load() {
 		return nil, ErrUsersNotReady
 	}
 

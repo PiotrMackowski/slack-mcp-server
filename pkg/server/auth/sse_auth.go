@@ -33,7 +33,7 @@ func validateToken(ctx context.Context, logger *zap.Logger) (bool, error) {
 	}
 
 	if keyA == "" {
-		logger.Debug("No SSE API key configured, skipping authentication",
+		logger.Warn("No API key configured — all HTTP/SSE requests will be allowed without authentication. Set SLACK_MCP_API_KEY to enable auth.",
 			zap.String("context", "http"),
 		)
 		return true, nil

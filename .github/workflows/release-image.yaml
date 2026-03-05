@@ -5,6 +5,10 @@ on:
     tags:
       - '*'
 
+permissions:
+  contents: read
+  packages: write
+
 env:
   DOCKERHUB_IMAGE_NAME: korotovsky/slack-mcp-server
   DOCKERHUB_USERNAME: korotovsky
