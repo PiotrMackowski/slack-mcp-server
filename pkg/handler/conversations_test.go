@@ -633,6 +633,78 @@ func TestUnitIsChannelAllowedForConfig(t *testing.T) {
 	}
 }
 
+func TestUnitIsChannelAllowedForEdit(t *testing.T) {
+	tests := []struct {
+		name     string
+		channel  string
+		envValue string
+		want     bool
+	}{
+		{"empty config allows all", "C123", "", true},
+		{"true allows all", "C123", "true", true},
+		{"allowlist - channel in list", "C123", "C123,C456", true},
+		{"allowlist - channel NOT in list", "C789", "C123,C456", false},
+		{"blocklist - channel in list", "C123", "!C123,!C456", false},
+		{"blocklist - channel NOT in list", "C789", "!C123,!C456", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			old := os.Getenv("SLACK_MCP_EDIT_MESSAGE_TOOL")
+			os.Setenv("SLACK_MCP_EDIT_MESSAGE_TOOL", tt.envValue)
+			defer func() {
+				if old == "" {
+					os.Unsetenv("SLACK_MCP_EDIT_MESSAGE_TOOL")
+				} else {
+					os.Setenv("SLACK_MCP_EDIT_MESSAGE_TOOL", old)
+				}
+			}()
+
+			got := isChannelAllowedForEdit(tt.channel)
+			if got != tt.want {
+				t.Errorf("isChannelAllowedForEdit(%q) with env=%q = %v, want %v",
+					tt.channel, tt.envValue, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestUnitIsChannelAllowedForDelete(t *testing.T) {
+	tests := []struct {
+		name     string
+		channel  string
+		envValue string
+		want     bool
+	}{
+		{"empty config allows all", "C123", "", true},
+		{"true allows all", "C123", "true", true},
+		{"allowlist - channel in list", "C123", "C123,C456", true},
+		{"allowlist - channel NOT in list", "C789", "C123,C456", false},
+		{"blocklist - channel in list", "C123", "!C123,!C456", false},
+		{"blocklist - channel NOT in list", "C789", "!C123,!C456", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			old := os.Getenv("SLACK_MCP_DELETE_MESSAGE_TOOL")
+			os.Setenv("SLACK_MCP_DELETE_MESSAGE_TOOL", tt.envValue)
+			defer func() {
+				if old == "" {
+					os.Unsetenv("SLACK_MCP_DELETE_MESSAGE_TOOL")
+				} else {
+					os.Setenv("SLACK_MCP_DELETE_MESSAGE_TOOL", old)
+				}
+			}()
+
+			got := isChannelAllowedForDelete(tt.channel)
+			if got != tt.want {
+				t.Errorf("isChannelAllowedForDelete(%q) with env=%q = %v, want %v",
+					tt.channel, tt.envValue, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestUnitIsSlackUserIDPrefix(t *testing.T) {
 	tests := []struct {
 		name string
