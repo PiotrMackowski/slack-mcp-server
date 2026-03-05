@@ -1,11 +1,12 @@
 services:
   mcp-server:
+    # Using :latest for the example compose file; pin to a specific version for production
     image: ghcr.io/korotovsky/slack-mcp-server:latest
     restart: unless-stopped
     networks:
       - app-tier
     ports:
-      - "3001:3001"
+      - "127.0.0.1:3001:3001"
     volumes:
       - users_cache:/app/mcp-server/.users_cache.json
       - channels_cache:/app/mcp-server/.channels_cache.json

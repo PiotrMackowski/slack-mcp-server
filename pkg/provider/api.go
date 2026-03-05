@@ -46,7 +46,7 @@ func getCacheDir() string {
 	}
 
 	dir := filepath.Join(cacheDir, "slack-mcp-server")
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := os.MkdirAll(dir, 0700); err != nil {
 		// Fallback to current directory if we can't create cache dir
 		return "."
 	}
@@ -233,7 +233,7 @@ type MCPSlackClient struct {
 	isEnterprise bool
 	isOAuth      bool
 	isBotToken   bool
-	edgeFailed   bool // set when edge API fails; subsequent calls skip straight to standard API
+	edgeFailed   atomic.Bool // set when edge API fails; subsequent calls skip straight to standard API
 	teamEndpoint string
 }
 
@@ -373,10 +373,10 @@ func (c *MCPSlackClient) GetConversationsContext(ctx context.Context, params *sl
 		// while the standard API paginates. We fully paginate the standard
 		// API here and return a merged, deduplicated result set with an
 		// empty cursor so the caller doesn't need to re-paginate.
-		if !c.edgeFailed {
+		if !c.edgeFailed.Load() {
 			edgeChannels, _, edgeErr := c.edgeClient.GetConversationsContext(ctx, nil)
 			if edgeErr != nil {
-				c.edgeFailed = true
+				c.edgeFailed.Store(true)
 				return c.slackClient.GetConversationsContext(ctx, params)
 			}
 

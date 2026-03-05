@@ -10,8 +10,9 @@ services:
     networks:
       - app-tier
     ports:
-      - "3001:3001"
-      - "127.0.0.1:40000:40000"
+      - "127.0.0.1:3001:3001"
+      # Uncomment when using delve debugger (see command above)
+      # - "127.0.0.1:40000:40000"
     env_file:
       - .env
     environment:
@@ -19,7 +20,6 @@ services:
       SLACK_MCP_PORT: "3001"
     # If you use this docker-compose file with HTTP Toolkit, you likely want to set
     # SLACK_MCP_PROXY="http://host.docker.internal:8000"
-    # SLACK_MCP_SERVER_CA_TOOLKIT="yes"
     extra_hosts:
      - "host.docker.internal:host-gateway"
 

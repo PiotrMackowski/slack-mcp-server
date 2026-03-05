@@ -1,5 +1,6 @@
 .idea
 .env
+.env.*
 .users_cache.json
 .channels_cache.json
 .channels_cache_v2.json
@@ -15,3 +16,9 @@
 /npm/slack-mcp-server/LICENSE
 /npm/slack-mcp-server/README.md
 docker-compose.release.yml
+
+# Sensitive files
+*.pem
+*.key
+*.crt
+*.log

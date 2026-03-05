@@ -4,9 +4,6 @@ ENV CGO_ENABLED=0
 ENV GOTOOLCHAIN=local
 ENV GOCACHE=/go/pkg/mod
 
-RUN apt-get update  \
-  && apt-get install -y --no-install-recommends net-tools curl
-
 WORKDIR /app
 
 COPY go.mod go.sum ./
@@ -23,7 +20,12 @@ FROM build AS dev
 RUN --mount=type=cache,target=/go/pkg/mod \
     go install github.com/go-delve/delve/cmd/dlv@v1.25.0 && cp /go/bin/dlv /dlv
 
+RUN addgroup --system appgroup && adduser --system --ingroup appgroup appuser
+
 WORKDIR /app/mcp-server
+RUN chown appuser:appgroup /app/mcp-server
+
+USER appuser
 
 EXPOSE 3001
 

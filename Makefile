@@ -84,13 +84,13 @@ npm-publish: npm-copy-binaries ## Publish the npm packages
 	$(foreach os,$(OSES),$(foreach arch,$(ARCHS), \
 		DIRNAME="$(BINARY_NAME)-$(os)-$(arch)"; \
 		cd npm/$$DIRNAME; \
-		echo '//registry.npmjs.org/:_authToken=$(NPM_TOKEN)' >> .npmrc; \
+		echo '//registry.npmjs.org/:_authToken=$${NPM_TOKEN}' >> .npmrc; \
 		jq '.version = "$(NPM_VERSION)"' package.json > tmp.json && mv tmp.json package.json; \
 		npm publish; \
 		cd ../..; \
 	))
 	cp README.md LICENSE ./npm/slack-mcp-server/
-	echo '//registry.npmjs.org/:_authToken=$(NPM_TOKEN)' >> ./npm/slack-mcp-server/.npmrc
+	echo '//registry.npmjs.org/:_authToken=$${NPM_TOKEN}' >> ./npm/slack-mcp-server/.npmrc
 	jq '.version = "$(NPM_VERSION)"' ./npm/slack-mcp-server/package.json > tmp.json && mv tmp.json ./npm/slack-mcp-server/package.json; \
 	jq '.optionalDependencies |= with_entries(.value = "$(NPM_VERSION)")' ./npm/slack-mcp-server/package.json > tmp.json && mv tmp.json ./npm/slack-mcp-server/package.json; \
 	cd npm/slack-mcp-server && npm publish
@@ -119,6 +119,9 @@ tidy: ## Tidy up the go modules
 release: ## Create release tag. Usage: make tag TAG=v1.2.3
 	@if [ -z "$(TAG)" ]; then \
 	  echo "Usage: make tag TAG=vX.Y.Z"; exit 1; \
+	fi
+	@if ! echo "$(TAG)" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+'; then \
+	  echo "Error: TAG must match semver format vX.Y.Z (e.g., v1.2.3)"; exit 1; \
 	fi
 	git tag -a "$(TAG)" -m "Release $(TAG)"
 	git push origin "$(TAG)"
