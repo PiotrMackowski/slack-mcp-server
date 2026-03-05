@@ -189,7 +189,7 @@ func (cl *Client) UsersList(ctx context.Context, channelIDs ...string) ([]User, 
 		return nil, errors.New("no channel IDs provided")
 	}
 	channelIDs, dmIDs := splitDMs(channelIDs)
-	var uu []User
+	var chanUsers, dmUsers []User
 	eg, ctx := errgroup.WithContext(ctx)
 	if len(channelIDs) > 0 {
 		eg.Go(func() error {
@@ -197,7 +197,7 @@ func (cl *Client) UsersList(ctx context.Context, channelIDs ...string) ([]User, 
 			if err != nil {
 				return err
 			}
-			uu = append(uu, u...)
+			chanUsers = u
 			return nil
 		})
 	}
@@ -207,14 +207,14 @@ func (cl *Client) UsersList(ctx context.Context, channelIDs ...string) ([]User, 
 			if err != nil {
 				return err
 			}
-			uu = append(uu, u...)
+			dmUsers = u
 			return nil
 		})
 	}
 	if err := eg.Wait(); err != nil {
 		return nil, err
 	}
-	return uu, nil
+	return append(chanUsers, dmUsers...), nil
 }
 
 func (cl *Client) publicUserList(ctx context.Context, channelIDs []string) ([]User, error) {
