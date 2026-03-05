@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/url"
@@ -577,15 +578,30 @@ func (ch *ConversationsHandler) FilesGetHandler(ctx context.Context, request mcp
 		encoding = "base64"
 	}
 
-	result := fmt.Sprintf(`{"file_id":"%s","filename":"%s","mimetype":"%s","size":%d,"encoding":"%s","content":"%s"}`,
-		fileInfo.ID,
-		escapeJSON(fileInfo.Name),
-		escapeJSON(fileInfo.Mimetype),
-		len(content),
-		encoding,
-		escapeJSON(contentStr))
+	type fileResult struct {
+		FileID   string `json:"file_id"`
+		Filename string `json:"filename"`
+		Mimetype string `json:"mimetype"`
+		Size     int    `json:"size"`
+		Encoding string `json:"encoding"`
+		Content  string `json:"content"`
+	}
 
-	return mcp.NewToolResultText(result), nil
+	res := fileResult{
+		FileID:   fileInfo.ID,
+		Filename: fileInfo.Name,
+		Mimetype: fileInfo.Mimetype,
+		Size:     len(content),
+		Encoding: encoding,
+		Content:  contentStr,
+	}
+
+	jsonBytes, err := json.Marshal(res)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal file result: %w", err)
+	}
+
+	return mcp.NewToolResultText(string(jsonBytes)), nil
 }
 
 func isTextMimetype(mimetype string) bool {
@@ -600,15 +616,6 @@ func isTextMimetype(mimetype string) bool {
 		"application/x-sh":       true,
 	}
 	return textMimetypes[mimetype]
-}
-
-func escapeJSON(s string) string {
-	s = strings.ReplaceAll(s, `\`, `\\`)
-	s = strings.ReplaceAll(s, `"`, `\"`)
-	s = strings.ReplaceAll(s, "\n", `\n`)
-	s = strings.ReplaceAll(s, "\r", `\r`)
-	s = strings.ReplaceAll(s, "\t", `\t`)
-	return s
 }
 
 // ConversationsHistoryHandler streams conversation history as CSV

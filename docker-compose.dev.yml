@@ -10,7 +10,7 @@ services:
       - app-tier
     ports:
       - "3001:3001"
-      - "40000:40000"
+      - "127.0.0.1:40000:40000"
     env_file:
       - .env
     environment:
