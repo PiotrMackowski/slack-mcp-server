@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/csv"
+	"errors"
 	"fmt"
 	"os"
 	"regexp"
@@ -25,7 +26,9 @@ func TestIntegrationConversations(t *testing.T) {
 	sseKey := uuid.New().String()
 	require.NotEmpty(t, sseKey, "sseKey must be generated for integration tests")
 	apiKey := os.Getenv("SLACK_MCP_OPENAI_API")
-	require.NotEmpty(t, apiKey, "SLACK_MCP_OPENAI_API must be set for integration tests")
+	if apiKey == "" {
+		t.Skip("Skipping integration test: SLACK_MCP_OPENAI_API not set")
+	}
 
 	cfg := util.MCPConfig{
 		SSEKey:             sseKey,
@@ -34,10 +37,17 @@ func TestIntegrationConversations(t *testing.T) {
 	}
 
 	mcp, err := util.SetupMCP(cfg)
+	if errors.Is(err, util.ErrMissingEnvVar) {
+		t.Skipf("Skipping integration test: %v", err)
+	}
 	if err != nil {
 		t.Fatalf("Failed to set up MCP server: %v", err)
 	}
 	fwd, err := util.SetupForwarding(context.Background(), "http://"+mcp.Host+":"+strconv.Itoa(mcp.Port))
+	if errors.Is(err, util.ErrMissingEnvVar) {
+		mcp.Shutdown()
+		t.Skipf("Skipping integration test: %v", err)
+	}
 	if err != nil {
 		t.Fatalf("Failed to set up ngrok forwarding: %v", err)
 	}

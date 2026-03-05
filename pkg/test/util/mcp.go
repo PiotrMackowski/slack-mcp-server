@@ -27,10 +27,14 @@ type MCPConnection struct {
 	Shutdown func()
 }
 
+// ErrMissingEnvVar is returned when a required environment variable is not set.
+// Tests should check for this error and call t.Skip() instead of failing.
+var ErrMissingEnvVar = fmt.Errorf("missing required environment variable")
+
 func SetupMCP(cfg MCPConfig) (*MCPConnection, error) {
 	xoxp := os.Getenv("SLACK_MCP_XOXP_TOKEN")
 	if xoxp == "" {
-		return nil, fmt.Errorf("SLACK_MCP_XOXP_TOKEN not set")
+		return nil, fmt.Errorf("%w: SLACK_MCP_XOXP_TOKEN not set", ErrMissingEnvVar)
 	}
 
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
