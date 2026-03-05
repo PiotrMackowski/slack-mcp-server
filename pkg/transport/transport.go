@@ -22,26 +22,6 @@ import (
 )
 
 const defaultUA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-const toolkitPEM = `-----BEGIN CERTIFICATE-----
-MIIDTzCCAjegAwIBAgIRCvyMzxdGWElNljTLqOyz44owDQYJKoZIhvcNAQELBQAw
-QTEYMBYGA1UEAxMPSFRUUCBUb29sa2l0IENBMQswCQYDVQQGEwJYWDEYMBYGA1UE
-ChMPSFRUUCBUb29sa2l0IENBMB4XDTI1MDMxMjE3NTU0M1oXDTI2MDMxMzE3NTU0
-M1owQTEYMBYGA1UEAxMPSFRUUCBUb29sa2l0IENBMQswCQYDVQQGEwJYWDEYMBYG
-A1UEChMPSFRUUCBUb29sa2l0IENBMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIB
-CgKCAQEArHe2mgAdlajHtNHHjCnUb7+UwsvYZ0AGPgpZT9hwAauqIa1BwH6bo4uY
-Zv4DnEKWVOt4wwVGNWtc5PyFAcO5lB9s9jRZYS/BIZALGrhti5YDw/IFNKFpiyeb
-buG18qlZz6f6+nEFd/QICl9S333hA89Pks6PUbYsbmSNmS7Dz5fxZN5QH9PoA7pa
-uDyJBhwJ0uB4UnkcC5tVVuH6vSd9mhtqur4cgo2Rfzz3TBMRDrrJIEVcR2tA3mPj
-9cTMgvfxZ+2Cgzin1FVkYJNsuL/HzoAzL8HXM6eKM/fn9cEWJKICIDR/cbrwl/RD
-6rtMWUS7Vo39Wq+OFx1Szn+8gIZUjwIDAQABo0IwQDAPBgNVHRMBAf8EBTADAQH/
-MA4GA1UdDwEB/wQEAwIBxjAdBgNVHQ4EFgQUwGDLxZ3sJfQRBX23oJj6X1EJJ0Aw
-DQYJKoZIhvcNAQELBQADggEBAAMcrGqFxWK3tM/eoVcchknYYQOyOQUjhWe1wfPo
-Gz51GRNcKD5Ip3ItR0bah2MYwHapGOKj0rvuHbpOZl+IJM2CRSx6IMisOds0LI70
-Qmz94je6GG2F3wxlF5P6BxKHuM6rCCqG1sgElnP59UomUejjWYkOXQd3xPIyJMuE
-qyKSCrGs0GOnDRwH6a//zLQF3KOFiN2jJj6oHijaIQfmE6Rgi+x8hGIX6J8adn0X
-g6ZwdV3myNqKQVJiV+6HSIO1y8tLOnBXjF751L56+fxQoP9Lh9wB0edq730mcb6y
-0GhBUL73wXOL2ymHsqrUhSpmScf+YnnX9GN29520s5LFTpY=
------END CERTIFICATE-----`
 
 // UserAgentTransport wraps another RoundTripper to add User-Agent and cookies
 type UserAgentTransport struct {
@@ -345,21 +325,20 @@ func ProvideHTTPClient(cookies []*http.Cookie, logger *zap.Logger) *http.Client 
 		parsed, err := url.Parse(proxyURL)
 		if err != nil {
 			logger.Fatal("Failed to parse proxy URL",
-				zap.String("proxy_url", proxyURL),
 				zap.Error(err))
 		}
+		// Log proxy URL with credentials redacted
+		redactedURL := *parsed
+		if redactedURL.User != nil {
+			redactedURL.User = url.UserPassword("REDACTED", "REDACTED")
+		}
+		logger.Info("Using proxy", zap.String("proxy_url", redactedURL.String()))
 		proxy = http.ProxyURL(parsed)
 	}
 
 	rootCAs, _ := x509.SystemCertPool()
 	if rootCAs == nil {
 		rootCAs = x509.NewCertPool()
-	}
-
-	if isToolkit := os.Getenv("SLACK_MCP_SERVER_CA_TOOLKIT"); isToolkit != "" {
-		if ok := rootCAs.AppendCertsFromPEM([]byte(toolkitPEM)); !ok {
-			logger.Warn("Failed to append toolkit certificate")
-		}
 	}
 
 	if localCertFile := os.Getenv("SLACK_MCP_SERVER_CA"); localCertFile != "" {
@@ -379,6 +358,10 @@ func ProvideHTTPClient(cookies []*http.Cookie, logger *zap.Logger) *http.Client 
 		if localCertFile := os.Getenv("SLACK_MCP_SERVER_CA"); localCertFile != "" {
 			logger.Fatal("SLACK_MCP_SERVER_CA and SLACK_MCP_SERVER_CA_INSECURE cannot be used together")
 		}
+		logger.Warn("TLS certificate verification is DISABLED — this is insecure and should only be used for debugging",
+			zap.String("context", "console"),
+			zap.String("env_var", "SLACK_MCP_SERVER_CA_INSECURE"),
+		)
 		insecure = true
 	}
 
