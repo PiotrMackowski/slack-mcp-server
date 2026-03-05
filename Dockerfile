@@ -1,4 +1,4 @@
-FROM golang:1.24 AS build
+FROM golang:1.26 AS build
 
 ENV CGO_ENABLED=0
 ENV GOTOOLCHAIN=local
@@ -32,7 +32,7 @@ EXPOSE 3001
 ENTRYPOINT ["mcp-server"]
 CMD ["--transport", "sse"]
 
-FROM alpine:3.22 AS production
+FROM alpine:3.23 AS production
 
 RUN apk add --no-cache ca-certificates
 
