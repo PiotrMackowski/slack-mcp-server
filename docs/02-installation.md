@@ -1,20 +1,35 @@
 ### 2. Installation
 
-> **Maintainer note**
->
-> I’m currently seeking a new **full-time or contract engineering role** after losing my primary job.  
-> This directly impacts my ability to maintain this project long-term.
->
-> If you know a **Hiring Manager, Engineering Manager, or startup team** that might be a good fit, I’d be grateful for an introduction.
->
-> 👉 See the full context in **[this issue](https://github.com/korotovsky/slack-mcp-server/issues/150)**  
-> 📩 Contact: `dmitry@korotovsky.io`
+#### Pre-built binary (recommended)
 
-Choose one of these installation methods:
+Download the binary for your platform from the [Releases](https://github.com/PiotrMackowski/slack-mcp-server/releases) page.
 
-- [DXT Extension](03-configuration-and-usage.md#Using-DXT)
-- [Cursor Installer](03-configuration-and-usage.md#Using-Cursor-Installer)
-- [npx](03-configuration-and-usage.md#Using-npx)
-- [Docker](03-configuration-and-usage.md#Using-Docker)
+```bash
+# macOS Apple Silicon
+curl -L -o slack-mcp-server \
+  https://github.com/PiotrMackowski/slack-mcp-server/releases/latest/download/slack-mcp-server-darwin-arm64
+
+# macOS Intel
+curl -L -o slack-mcp-server \
+  https://github.com/PiotrMackowski/slack-mcp-server/releases/latest/download/slack-mcp-server-darwin-amd64
+
+# Linux x86_64
+curl -L -o slack-mcp-server \
+  https://github.com/PiotrMackowski/slack-mcp-server/releases/latest/download/slack-mcp-server-linux-amd64
+
+chmod +x slack-mcp-server
+```
+
+Move it somewhere on your PATH or reference the full path in your MCP client config.
+
+#### Build from source
+
+Requires Go 1.24+.
+
+```bash
+git clone https://github.com/PiotrMackowski/slack-mcp-server.git
+cd slack-mcp-server
+go build -o slack-mcp-server ./cmd/slack-mcp-server/
+```
 
 See next: [Configuration and Usage](03-configuration-and-usage.md)

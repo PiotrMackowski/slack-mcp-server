@@ -10,6 +10,7 @@
 /build/slack-mcp-server.dxt
 /build/slack-mcp-server
 /slack-mcp-server
+/dist/
 /npm/slack-mcp-server-*/bin/slack-mcp-server-*
 /npm/slack-mcp-server-*/.npmrc
 /npm/slack-mcp-server/.npmrc
