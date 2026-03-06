@@ -348,7 +348,7 @@ func NewMCPServer(provider *provider.ApiProvider, logger *zap.Logger, enabledToo
 	// Bot tokens (xoxb) don't support unread tracking, so exclude them (same pattern as search tool).
 	if !provider.IsBotToken() && shouldAddTool(ToolConversationsUnreads, enabledTools, "") {
 		s.AddTool(mcp.NewTool(ToolConversationsUnreads,
-			mcp.WithDescription("Get unread messages across all channels. With browser session tokens (xoxc/xoxd), uses a single API call for complete results. With OAuth user tokens (xoxp), scans a subset of channels per type (limited by max_channels) — results may be partial on large workspaces. Results are prioritized: DMs > group DMs > partner channels > internal channels."),
+			mcp.WithDescription("Get unread messages across all channels. Scans a subset of channels per type (limited by max_channels) — results may be partial on large workspaces. Results are prioritized: DMs > group DMs > partner channels > internal channels."),
 			mcp.WithTitleAnnotation("Get Unread Messages"),
 			mcp.WithReadOnlyHintAnnotation(true),
 			mcp.WithBoolean("include_messages",
@@ -453,7 +453,7 @@ func NewMCPServer(provider *provider.ApiProvider, logger *zap.Logger, enabledToo
 		), usergroupsHandler.UsergroupsMeHandler)
 	}
 
-	if shouldAddTool(ToolUsergroupsCreate, enabledTools, "") {
+	if shouldAddTool(ToolUsergroupsCreate, enabledTools, "SLACK_MCP_USERGROUP_WRITE_TOOL") {
 		s.AddTool(mcp.NewTool(ToolUsergroupsCreate,
 			mcp.WithDescription("Create a new user group (mention group) in the Slack workspace. After creation, use usergroups_users_update to add members, or users can join themselves with usergroups_me. The handle becomes the @mention (e.g., handle='engineering' creates @engineering)."),
 			mcp.WithTitleAnnotation("Create User Group"),
@@ -474,7 +474,7 @@ func NewMCPServer(provider *provider.ApiProvider, logger *zap.Logger, enabledToo
 		), usergroupsHandler.UsergroupsCreateHandler)
 	}
 
-	if shouldAddTool(ToolUsergroupsUpdate, enabledTools, "") {
+	if shouldAddTool(ToolUsergroupsUpdate, enabledTools, "SLACK_MCP_USERGROUP_WRITE_TOOL") {
 		s.AddTool(mcp.NewTool(ToolUsergroupsUpdate,
 			mcp.WithDescription("Update a user group's metadata: name, handle (@mention), description, or default channels. Does NOT change members - use usergroups_users_update for that. At least one field must be provided."),
 			mcp.WithTitleAnnotation("Update User Group"),
@@ -498,7 +498,7 @@ func NewMCPServer(provider *provider.ApiProvider, logger *zap.Logger, enabledToo
 		), usergroupsHandler.UsergroupsUpdateHandler)
 	}
 
-	if shouldAddTool(ToolUsergroupsUsersUpdate, enabledTools, "") {
+	if shouldAddTool(ToolUsergroupsUsersUpdate, enabledTools, "SLACK_MCP_USERGROUP_WRITE_TOOL") {
 		s.AddTool(mcp.NewTool(ToolUsergroupsUsersUpdate,
 			mcp.WithDescription("Replace all members of a user group with a new list. WARNING: This completely replaces the member list - any user not in the 'users' parameter will be removed. To add/remove just yourself, use usergroups_me instead. To add a single user without removing others, first get current members from usergroups_list with include_users=true, then call this with the combined list."),
 			mcp.WithTitleAnnotation("Update User Group Members"),
@@ -627,7 +627,7 @@ func buildErrorRecoveryMiddleware(logger *zap.Logger) server.ToolHandlerMiddlewa
 					zap.String("tool", req.Params.Name),
 					zap.Error(err),
 				)
-				return mcp.NewToolResultError(err.Error()), nil
+				return mcp.NewToolResultError("internal error"), nil
 			}
 			return res, nil
 		}

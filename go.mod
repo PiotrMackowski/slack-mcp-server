@@ -8,24 +8,19 @@ require (
 	github.com/mark3labs/mcp-go v0.44.1
 	github.com/mattn/go-isatty v0.0.20
 	github.com/openai/openai-go v1.12.0
-	github.com/refraction-networking/utls v1.8.2
 	github.com/rusq/slack v0.9.6-0.20250408103104-dd80d1b6337f
-	github.com/rusq/slackauth v0.7.1
 	github.com/rusq/slackdump/v3 v3.1.13
-	github.com/rusq/tagops v0.1.1
 	github.com/slack-go/slack v0.19.0
 	github.com/stretchr/testify v1.11.1
 	github.com/takara2314/slack-go-util v0.3.0
 	go.uber.org/zap v1.27.1
 	golang.ngrok.com/ngrok/v2 v2.1.1
 	golang.org/x/net v0.51.0
-	golang.org/x/sync v0.19.0
 	golang.org/x/time v0.14.0
 )
 
 require (
 	github.com/MercuryEngineering/CookieMonster v0.0.0-20180304172713-1584578b3403 // indirect
-	github.com/andybalholm/brotli v1.2.0 // indirect
 	github.com/atotto/clipboard v0.1.4 // indirect
 	github.com/aymanbagabas/go-osc52/v2 v2.0.1 // indirect
 	github.com/bahlo/generic-list-go v0.2.0 // indirect
@@ -58,7 +53,6 @@ require (
 	github.com/invopop/jsonschema v0.13.0 // indirect
 	github.com/joho/godotenv v1.5.1 // indirect
 	github.com/jpillora/backoff v1.0.0 // indirect
-	github.com/klauspost/compress v1.18.0 // indirect
 	github.com/lucasb-eyer/go-colorful v1.3.0 // indirect
 	github.com/mailru/easyjson v0.7.7 // indirect
 	github.com/mattn/go-colorable v0.1.14 // indirect
@@ -74,6 +68,7 @@ require (
 	github.com/rogpeppe/go-internal v1.14.1 // indirect
 	github.com/rusq/chttp v1.1.0 // indirect
 	github.com/rusq/fsadapter v1.1.0 // indirect
+	github.com/rusq/slackauth v0.7.1 // indirect
 	github.com/spf13/cast v1.7.1 // indirect
 	github.com/tidwall/gjson v1.17.0 // indirect
 	github.com/tidwall/match v1.1.1 // indirect
@@ -90,7 +85,6 @@ require (
 	github.com/yuin/goldmark v1.7.13 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	golang.ngrok.com/muxado/v2 v2.0.1 // indirect
-	golang.org/x/crypto v0.48.0 // indirect
 	golang.org/x/sys v0.41.0 // indirect
 	golang.org/x/term v0.40.0 // indirect
 	golang.org/x/text v0.34.0 // indirect
