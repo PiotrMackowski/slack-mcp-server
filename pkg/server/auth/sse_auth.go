@@ -88,7 +88,14 @@ func AuthFromRequest(logger *zap.Logger) func(context.Context, *http.Request) co
 
 // BuildMiddleware creates a middleware function that ensures authentication based on the provided transport type.
 // The API key is resolved once at middleware creation time, not on every request.
+// For stdio transport, authentication is skipped entirely (no network exposure).
 func BuildMiddleware(transport string, logger *zap.Logger) server.ToolHandlerMiddleware {
+	if transport == "stdio" {
+		return func(next server.ToolHandlerFunc) server.ToolHandlerFunc {
+			return next
+		}
+	}
+
 	apiKey := resolveAPIKey(logger)
 	return func(next server.ToolHandlerFunc) server.ToolHandlerFunc {
 		return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
