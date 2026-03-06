@@ -14,13 +14,29 @@ import (
 	"sync/atomic"
 	"time"
 
+	"net/http"
+
 	"github.com/korotovsky/slack-mcp-server/pkg/limiter"
 	"github.com/korotovsky/slack-mcp-server/pkg/transport"
-	"github.com/rusq/slackdump/v3/auth"
 	"github.com/slack-go/slack"
 	"go.uber.org/zap"
 	"golang.org/x/time/rate"
 )
+
+// authProvider is a minimal auth interface replacing the slackdump/v3/auth dependency.
+// For xoxb/xoxp bot tokens, Cookies() always returns nil.
+type authProvider interface {
+	SlackToken() string
+	Cookies() []*http.Cookie
+}
+
+// tokenAuth implements authProvider for bot/user OAuth tokens.
+type tokenAuth struct {
+	token string
+}
+
+func (t tokenAuth) SlackToken() string      { return t.token }
+func (t tokenAuth) Cookies() []*http.Cookie { return nil }
 
 const usersNotReadyMsg = "users cache is not ready yet, sync process is still running... please wait"
 const channelsNotReadyMsg = "channels cache is not ready yet, sync process is still running... please wait"
@@ -112,13 +128,13 @@ func getMinRefreshInterval() time.Duration {
 // This ensures tokens are valid before proceeding and enables cache namespacing
 // to prevent cache contamination when using multiple Slack workspaces.
 // Returns an error if authentication fails - the server should not start with invalid credentials.
-func validateAuthAndGetTeamID(authProvider auth.Provider, logger *zap.Logger) (string, error) {
-	httpClient := transport.ProvideHTTPClient(authProvider.Cookies(), logger)
+func validateAuthAndGetTeamID(auth authProvider, logger *zap.Logger) (string, error) {
+	httpClient := transport.ProvideHTTPClient(auth.Cookies(), logger)
 	slackOpts := []slack.Option{slack.OptionHTTPClient(httpClient)}
 	if os.Getenv("SLACK_MCP_GOVSLACK") == "true" {
 		slackOpts = append(slackOpts, slack.OptionAPIURL("https://slack-gov.com/api/"))
 	}
-	slackClient := slack.New(authProvider.SlackToken(), slackOpts...)
+	slackClient := slack.New(auth.SlackToken(), slackOpts...)
 
 	authResp, err := slackClient.AuthTest()
 	if err != nil {
@@ -212,10 +228,9 @@ type MCPSlackClient struct {
 	slackClient *slack.Client
 
 	authResponse *slack.AuthTestResponse
-	authProvider auth.Provider
+	authProvider authProvider
 
 	isEnterprise bool
-	isOAuth      bool
 	isBotToken   bool
 	teamEndpoint string
 }
@@ -244,14 +259,14 @@ type ApiProvider struct {
 	channelsMu                sync.RWMutex // protects lastForcedChannelsRefresh
 }
 
-func NewMCPSlackClient(authProvider auth.Provider, logger *zap.Logger) (*MCPSlackClient, error) {
-	httpClient := transport.ProvideHTTPClient(authProvider.Cookies(), logger)
+func NewMCPSlackClient(auth authProvider, logger *zap.Logger) (*MCPSlackClient, error) {
+	httpClient := transport.ProvideHTTPClient(auth.Cookies(), logger)
 
 	slackOpts := []slack.Option{slack.OptionHTTPClient(httpClient)}
 	if os.Getenv("SLACK_MCP_GOVSLACK") == "true" {
 		slackOpts = append(slackOpts, slack.OptionAPIURL("https://slack-gov.com/api/"))
 	}
-	slackClient := slack.New(authProvider.SlackToken(), slackOpts...)
+	slackClient := slack.New(auth.SlackToken(), slackOpts...)
 
 	authResp, err := slackClient.AuthTest()
 	if err != nil {
@@ -268,26 +283,23 @@ func NewMCPSlackClient(authProvider auth.Provider, logger *zap.Logger) (*MCPSlac
 		BotID:        authResp.BotID,
 	}
 
-	slackClient = slack.New(authProvider.SlackToken(),
+	slackClient = slack.New(auth.SlackToken(),
 		slack.OptionHTTPClient(httpClient),
 		slack.OptionAPIURL(authResp.URL+"api/"),
 	)
 
 	isEnterprise := authResp.EnterpriseID != ""
-	token := authProvider.SlackToken()
+	token := auth.SlackToken()
 
 	// Token type detection
-	// isOAuth: Official OAuth tokens (xoxp or xoxb) - uses Standard API
 	// isBotToken: Bot token - determines feature availability (e.g., search)
-	isOAuth := strings.HasPrefix(token, "xoxp-") || strings.HasPrefix(token, "xoxb-")
 	isBotToken := strings.HasPrefix(token, "xoxb-")
 
 	return &MCPSlackClient{
 		slackClient:  slackClient,
 		authResponse: authResponse,
-		authProvider: authProvider,
+		authProvider: auth,
 		isEnterprise: isEnterprise,
-		isOAuth:      isOAuth,
 		isBotToken:   isBotToken,
 		teamEndpoint: authResp.URL,
 	}, nil
@@ -401,20 +413,7 @@ func (c *MCPSlackClient) IsBotToken() bool {
 	return c.isBotToken
 }
 
-func (c *MCPSlackClient) IsOAuth() bool {
-	return c.isOAuth
-}
-
-func (c *MCPSlackClient) Raw() *slack.Client {
-	return c.slackClient
-}
-
 func New(transport string, logger *zap.Logger) *ApiProvider {
-	var (
-		authProvider auth.ValueAuth
-		err          error
-	)
-
 	// Read all environment variables
 	xoxpToken := os.Getenv("SLACK_MCP_XOXP_TOKEN")
 	xoxbToken := os.Getenv("SLACK_MCP_XOXB_TOKEN")
@@ -431,34 +430,24 @@ func New(transport string, logger *zap.Logger) *ApiProvider {
 
 	// Priority 1: XOXP token (User OAuth)
 	if xoxpToken != "" {
-		authProvider, err = auth.NewValueAuth(xoxpToken, "")
-		if err != nil {
-			logger.Fatal("Failed to create auth provider with XOXP token", zap.Error(err))
-		}
-
-		return newWithXOXP(transport, authProvider, logger)
+		return newWithXOXP(transport, tokenAuth{token: xoxpToken}, logger)
 	}
 
 	// Priority 2: XOXB token (Bot)
 	if xoxbToken != "" {
-		authProvider, err = auth.NewValueAuth(xoxbToken, "")
-		if err != nil {
-			logger.Fatal("Failed to create auth provider with XOXB token", zap.Error(err))
-		}
-
 		logger.Info("Using Bot token authentication",
 			zap.String("context", "console"),
 			zap.String("token_type", "xoxb"),
 		)
 
-		return newWithXOXB(transport, authProvider, logger)
+		return newWithXOXB(transport, tokenAuth{token: xoxbToken}, logger)
 	}
 
 	logger.Fatal("Authentication required: Either SLACK_MCP_XOXP_TOKEN or SLACK_MCP_XOXB_TOKEN must be provided")
 	return nil // unreachable, but satisfies the compiler
 }
 
-func newWithXOXP(transport string, authProvider auth.ValueAuth, logger *zap.Logger) *ApiProvider {
+func newWithXOXP(transport string, authProvider tokenAuth, logger *zap.Logger) *ApiProvider {
 	teamID, err := validateAuthAndGetTeamID(authProvider, logger)
 	if err != nil {
 		logger.Fatal("Authentication failed - check your Slack tokens", zap.Error(err))
@@ -503,7 +492,7 @@ func newWithXOXP(transport string, authProvider auth.ValueAuth, logger *zap.Logg
 	return ap
 }
 
-func newWithXOXB(transport string, authProvider auth.ValueAuth, logger *zap.Logger) *ApiProvider {
+func newWithXOXB(transport string, authProvider tokenAuth, logger *zap.Logger) *ApiProvider {
 	// Bot tokens share the same initialization logic as user OAuth tokens.
 	return newWithXOXP(transport, authProvider, logger)
 }
@@ -888,8 +877,7 @@ func (ap *ApiProvider) GetChannels(ctx context.Context, channelTypes []string) [
 	}
 
 	// Fetch all channel types in a single paginated call. The standard
-	// conversations.list API supports multiple types per request, and the edge
-	// API (Enterprise Grid + non-OAuth) returns all types regardless. This
+	// conversations.list API supports multiple types per request. This
 	// avoids making 4 separate API round-trips (one per type).
 	chans := ap.getChannelsMultiType(ctx, AllChanTypes)
 
@@ -957,11 +945,6 @@ func (ap *ApiProvider) Slack() SlackAPI {
 func (ap *ApiProvider) IsBotToken() bool {
 	client, ok := ap.client.(*MCPSlackClient)
 	return ok && client != nil && client.IsBotToken()
-}
-
-func (ap *ApiProvider) IsOAuth() bool {
-	client, ok := ap.client.(*MCPSlackClient)
-	return ok && client != nil && client.IsOAuth()
 }
 
 // SearchUsers searches for users by name, email, or display name.
