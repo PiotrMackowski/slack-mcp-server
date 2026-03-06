@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"flag"
 	"fmt"
+	"net/http"
 	"os"
 	"strconv"
 	"strings"
@@ -94,6 +96,17 @@ func main() {
 		newChannelsWatcher(p, &once, logger)()
 	}()
 
+	// Require API key for network-facing transports (SSE/HTTP).
+	// stdio is exempt because it communicates over stdin/stdout only.
+	if transport == "sse" || transport == "http" {
+		if os.Getenv("SLACK_MCP_API_KEY") == "" && os.Getenv("SLACK_MCP_SSE_API_KEY") == "" {
+			logger.Fatal("SLACK_MCP_API_KEY must be set when using SSE or HTTP transport — refusing to start without authentication",
+				zap.String("context", "console"),
+				zap.String("transport", transport),
+			)
+		}
+	}
+
 	switch transport {
 	case "stdio":
 		for {
@@ -132,7 +145,7 @@ func main() {
 			)
 		}
 
-		if err := sseServer.Start(host + ":" + port); err != nil {
+		if err := startServerWithOptionalTLS(sseServer, host+":"+port, logger); err != nil {
 			logger.Fatal("Server error",
 				zap.String("context", "console"),
 				zap.Error(err),
@@ -162,7 +175,7 @@ func main() {
 			)
 		}
 
-		if err := httpServer.Start(host + ":" + port); err != nil {
+		if err := startServerWithOptionalTLS(httpServer, host+":"+port, logger); err != nil {
 			logger.Fatal("Server error",
 				zap.String("context", "console"),
 				zap.Error(err),
@@ -239,6 +252,95 @@ func newChannelsWatcher(p *provider.ApiProvider, once *sync.Once, logger *zap.Lo
 			})
 		}
 	}
+}
+
+// mcpStarter is the common interface for SSE and HTTP MCP servers.
+type mcpStarter interface {
+	Start(addr string) error
+	http.Handler
+}
+
+// corsMiddleware wraps an http.Handler with CORS headers restricted to the specified origin.
+func corsMiddleware(origin string, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", origin)
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type")
+
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	})
+}
+
+// startServerWithOptionalTLS starts the MCP server with optional TLS (via SLACK_MCP_TLS_CERT /
+// SLACK_MCP_TLS_KEY) and optional CORS restrictions (via SLACK_MCP_CORS_ORIGIN).
+// If neither TLS nor CORS is configured, delegates to s.Start().
+func startServerWithOptionalTLS(s mcpStarter, addr string, logger *zap.Logger) error {
+	certFile := os.Getenv("SLACK_MCP_TLS_CERT")
+	keyFile := os.Getenv("SLACK_MCP_TLS_KEY")
+	corsOrigin := os.Getenv("SLACK_MCP_CORS_ORIGIN")
+
+	useTLS := certFile != "" || keyFile != ""
+	useCORS := corsOrigin != ""
+
+	// Fast path: no TLS, no CORS — use the library's built-in Start.
+	if !useTLS && !useCORS {
+		return s.Start(addr)
+	}
+
+	if useTLS {
+		if certFile == "" || keyFile == "" {
+			logger.Fatal("Both SLACK_MCP_TLS_CERT and SLACK_MCP_TLS_KEY must be set to enable TLS",
+				zap.String("context", "console"),
+			)
+		}
+	}
+
+	var handler http.Handler = s
+	if useCORS {
+		logger.Info("CORS enabled",
+			zap.String("context", "console"),
+			zap.String("allowed_origin", corsOrigin),
+		)
+		handler = corsMiddleware(corsOrigin, handler)
+	}
+
+	srv := &http.Server{
+		Addr:    addr,
+		Handler: handler,
+	}
+
+	if useTLS {
+		cert, err := tls.LoadX509KeyPair(certFile, keyFile)
+		if err != nil {
+			logger.Fatal("Failed to load TLS certificate",
+				zap.String("context", "console"),
+				zap.String("cert", certFile),
+				zap.String("key", keyFile),
+				zap.Error(err),
+			)
+		}
+		srv.TLSConfig = &tls.Config{
+			Certificates: []tls.Certificate{cert},
+			MinVersion:   tls.VersionTLS12,
+		}
+		logger.Info("Starting server with TLS",
+			zap.String("context", "console"),
+			zap.String("addr", addr),
+			zap.String("cert", certFile),
+		)
+		return srv.ListenAndServeTLS("", "")
+	}
+
+	logger.Info("Starting server with custom handler (CORS)",
+		zap.String("context", "console"),
+		zap.String("addr", addr),
+	)
+	return srv.ListenAndServe()
 }
 
 func validateToolConfig(config string) error {

@@ -298,7 +298,10 @@ func (ch *ConversationsHandler) ConversationsAddMessageHandler(ctx context.Conte
 	return marshalMessagesToCSV(messages)
 }
 
-// ConversationsEditMessageHandler edits an existing message in a channel
+// ConversationsEditMessageHandler edits an existing message in a channel.
+// NOTE: Ownership enforcement (can only edit own messages) is handled server-side by the Slack API.
+// If the authenticated user attempts to edit a message they did not author, Slack returns a
+// "cant_update_message" error. No client-side ownership check is needed or desired here.
 func (ch *ConversationsHandler) ConversationsEditMessageHandler(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	ch.logger.Debug("ConversationsEditMessageHandler called", zap.Any("params", request.Params))
 
@@ -362,7 +365,10 @@ func (ch *ConversationsHandler) ConversationsEditMessageHandler(ctx context.Cont
 	return marshalMessagesToCSV(messages)
 }
 
-// ConversationsDeleteMessageHandler deletes a message from a channel
+// ConversationsDeleteMessageHandler deletes a message from a channel.
+// NOTE: Ownership enforcement (can only delete own messages) is handled server-side by the Slack API.
+// If the authenticated user attempts to delete a message they did not author, Slack returns a
+// "cant_delete_message" error. No client-side ownership check is needed or desired here.
 func (ch *ConversationsHandler) ConversationsDeleteMessageHandler(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	ch.logger.Debug("ConversationsDeleteMessageHandler called", zap.Any("params", request.Params))
 
@@ -1434,7 +1440,7 @@ func (ch *ConversationsHandler) getChannelDisplayName(info *slack.Channel, chann
 func (ch *ConversationsHandler) ConversationsMarkHandler(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	ch.logger.Debug("ConversationsMarkHandler called", zap.Any("params", request.Params))
 
-	params, err := ch.parseParamsToolMark(request)
+	params, err := ch.parseParamsToolMark(ctx, request)
 	if err != nil {
 		ch.logger.Error("Failed to parse mark params", zap.Error(err))
 		return nil, err
@@ -2045,17 +2051,26 @@ func (ch *ConversationsHandler) parseParamsToolUsersSearch(request mcp.CallToolR
 }
 
 func (ch *ConversationsHandler) parseParamsToolUnreads(request mcp.CallToolRequest) *unreadsParams {
+	maxChannels := request.GetInt("max_channels", 50)
+	if maxChannels > 50 {
+		maxChannels = 50
+	}
+	maxMessagesPerChannel := request.GetInt("max_messages_per_channel", 10)
+	if maxMessagesPerChannel > 100 {
+		maxMessagesPerChannel = 100
+	}
+
 	return &unreadsParams{
 		includeMessages:       request.GetBool("include_messages", true),
 		channelTypes:          request.GetString("channel_types", "all"),
-		maxChannels:           request.GetInt("max_channels", 50),
-		maxMessagesPerChannel: request.GetInt("max_messages_per_channel", 10),
+		maxChannels:           maxChannels,
+		maxMessagesPerChannel: maxMessagesPerChannel,
 		mentionsOnly:          request.GetBool("mentions_only", false),
 		includeMuted:          request.GetBool("include_muted", false),
 	}
 }
 
-func (ch *ConversationsHandler) parseParamsToolMark(request mcp.CallToolRequest) (*markParams, error) {
+func (ch *ConversationsHandler) parseParamsToolMark(ctx context.Context, request mcp.CallToolRequest) (*markParams, error) {
 	toolConfig := os.Getenv("SLACK_MCP_MARK_TOOL")
 	if toolConfig == "" {
 		ch.logger.Error("Mark tool disabled by default")
@@ -2079,16 +2094,12 @@ func (ch *ConversationsHandler) parseParamsToolMark(request mcp.CallToolRequest)
 		return nil, errors.New("channel_id is required")
 	}
 
-	// Resolve channel name to ID if needed
-	if strings.HasPrefix(channel, "#") || strings.HasPrefix(channel, "@") {
-		channelsMaps := ch.apiProvider.ProvideChannelsMaps()
-		chn, ok := channelsMaps.ChannelsInv[channel]
-		if !ok {
-			ch.logger.Error("Channel not found", zap.String("channel", channel))
-			return nil, fmt.Errorf("channel %q not found", channel)
-		}
-		channel = channelsMaps.Channels[chn].ID
+	// Resolve channel name to ID if needed (with cache retry on miss)
+	resolvedChannel, err := ch.resolveChannelID(ctx, channel)
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve channel: %w", err)
 	}
+	channel = resolvedChannel
 
 	ts := request.GetString("ts", "")
 

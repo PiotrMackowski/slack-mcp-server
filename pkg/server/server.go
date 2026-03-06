@@ -627,7 +627,7 @@ func buildErrorRecoveryMiddleware(logger *zap.Logger) server.ToolHandlerMiddlewa
 					zap.String("tool", req.Params.Name),
 					zap.Error(err),
 				)
-				return mcp.NewToolResultError(err.Error()), nil
+				return mcp.NewToolResultError("internal error"), nil
 			}
 			return res, nil
 		}

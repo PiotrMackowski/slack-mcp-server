@@ -33,7 +33,7 @@ func resolveAPIKey(logger *zap.Logger) string {
 	}
 
 	if key == "" {
-		logger.Warn("No API key configured — all HTTP/SSE requests will be allowed without authentication. Set SLACK_MCP_API_KEY to enable auth.",
+		logger.Fatal("No API key configured — refusing to start in HTTP/SSE mode without authentication. Set SLACK_MCP_API_KEY to enable auth.",
 			zap.String("context", "http"),
 		)
 	}
