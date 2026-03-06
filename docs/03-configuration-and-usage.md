@@ -20,8 +20,8 @@ For [Claude Desktop](https://claude.ai/download) users, you can use the DXT exte
 2. Click on the `Extensions` tab.
 3. Drag and drop the downloaded .dxt file to install it and click "Install".
 5. Fill all required configuration fields
-    - Authentication method: `xoxc/xoxd`, `xoxp`, or `xoxb`.
-    - Value for `SLACK_MCP_XOXC_TOKEN` and `SLACK_MCP_XOXD_TOKEN` in case of `xoxc/xoxd` method, `SLACK_MCP_XOXP_TOKEN` in case of `xoxp`, or `SLACK_MCP_XOXB_TOKEN` in case of `xoxb`.
+    - Authentication method: `xoxp` or `xoxb`.
+    - Value for `SLACK_MCP_XOXP_TOKEN` in case of `xoxp`, or `SLACK_MCP_XOXB_TOKEN` in case of `xoxb`.
     - You may also enable `Add Message Tool` to allow posting messages to channels.
     - You may also change User-Agent if needed if you have Enterprise Slack.
 6. Enable MCP Server.
@@ -35,7 +35,6 @@ The MCP server can be installed using the Cursor One-Click method.
 
 Below are prepared configurations:
 
- - `npx` and `xoxc/xoxd` method: [![Install MCP Server](https://cursor.com/deeplink/mcp-install-light.svg)](cursor://anysphere.cursor-deeplink/mcp/install?name=slack-mcp-server&config=eyJjb21tYW5kIjogIm5weCAteSBzbGFjay1tY3Atc2VydmVyQGxhdGVzdCAtLXRyYW5zcG9ydCBzdGRpbyIsImVudiI6IHsiU0xBQ0tfTUNQX1hPWENfVE9LRU4iOiAieG94Yy0uLi4iLCAiU0xBQ0tfTUNQX1hPWERfVE9LRU4iOiAieG94ZC0uLi4ifSwiZGlzYWJsZWQiOiBmYWxzZSwiYXV0b0FwcHJvdmUiOiBbXX0%3D)
  - `npx` and `xoxp` method: [![Install MCP Server](https://cursor.com/deeplink/mcp-install-light.svg)](cursor://anysphere.cursor-deeplink/mcp/install?name=slack-mcp-server&config=eyJjb21tYW5kIjogIm5weCAteSBzbGFjay1tY3Atc2VydmVyQGxhdGVzdCAtLXRyYW5zcG9ydCBzdGRpbyIsImVudiI6IHsiU0xBQ0tfTUNQX1hPWFBfVE9LRU4iOiAieG94cC0uLi4ifSwiZGlzYWJsZWQiOiBmYWxzZSwiYXV0b0FwcHJvdmUiOiBbXX0%3D)
  - `npx` and `xoxb` method: [![Install MCP Server](https://cursor.com/deeplink/mcp-install-light.svg)](cursor://anysphere.cursor-deeplink/mcp/install?name=slack-mcp-server&config=eyJjb21tYW5kIjogIm5weCAteSBzbGFjay1tY3Atc2VydmVyQGxhdGVzdCAtLXRyYW5zcG9ydCBzdGRpbyIsImVudiI6IHsiU0xBQ0tfTUNQX1hPWEJfVE9LRU4iOiAieG94Yi0uLi4ifSwiZGlzYWJsZWQiOiBmYWxzZSwiYXV0b0FwcHJvdmUiOiBbXX0%3D)
 
@@ -88,27 +87,6 @@ Open your `claude_desktop_config.json` and add the mcp server to the list of `mc
 }
 ```
 
-**Option 3: Using XOXC/XOXD Tokens**
-``` json
-{
-  "mcpServers": {
-    "slack": {
-      "command": "npx",
-      "args": [
-        "-y",
-        "slack-mcp-server@latest",
-        "--transport",
-        "stdio"
-      ],
-      "env": {
-        "SLACK_MCP_XOXC_TOKEN": "xoxc-...",
-        "SLACK_MCP_XOXD_TOKEN": "xoxd-..."
-      }
-    }
-  }
-}
-```
-
 <details>
 <summary>Or, stdio transport with docker.</summary>
 
@@ -130,33 +108,6 @@ Open your `claude_desktop_config.json` and add the mcp server to the list of `mc
       ],
       "env": {
         "SLACK_MCP_XOXP_TOKEN": "xoxp-..."
-      }
-    }
-  }
-}
-```
-
-**Option 2: Using XOXC/XOXD Tokens**
-```json
-{
-  "mcpServers": {
-    "slack": {
-      "command": "docker",
-      "args": [
-        "run",
-        "-i",
-        "--rm",
-        "-e",
-        "SLACK_MCP_XOXC_TOKEN",
-        "-e",
-        "SLACK_MCP_XOXD_TOKEN",
-        "ghcr.io/korotovsky/slack-mcp-server",
-        "--transport",
-        "stdio"
-      ],
-      "env": {
-        "SLACK_MCP_XOXC_TOKEN": "xoxc-...",
-        "SLACK_MCP_XOXD_TOKEN": "xoxd-..."
       }
     }
   }
@@ -233,13 +184,11 @@ and then use the endpoint `https://903d-xxx-xxxx-xxxx-10b4.ngrok-free.app` for y
 For detailed information about all environment variables, see [Environment Variables](https://github.com/korotovsky/slack-mcp-server?tab=readme-ov-file#environment-variables).
 
 ```bash
-export SLACK_MCP_XOXC_TOKEN=xoxc-...
-export SLACK_MCP_XOXD_TOKEN=xoxd-...
+export SLACK_MCP_XOXP_TOKEN=xoxp-...
 
 docker pull ghcr.io/korotovsky/slack-mcp-server:latest
 docker run -i --rm \
-  -e SLACK_MCP_XOXC_TOKEN \
-  -e SLACK_MCP_XOXD_TOKEN \
+  -e SLACK_MCP_XOXP_TOKEN \
   ghcr.io/korotovsky/slack-mcp-server:latest --transport stdio
 ```
 
@@ -264,9 +213,7 @@ docker-compose up -d
 
 | Variable                          | Required? | Default                   | Description                                                                                                                                                                                                                                                                               |
 |-----------------------------------|-----------|---------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `SLACK_MCP_XOXC_TOKEN`            | Yes*      | `nil`                     | Slack browser token (`xoxc-...`)                                                                                                                                                                                                                                                          |
-| `SLACK_MCP_XOXD_TOKEN`            | Yes*      | `nil`                     | Slack browser cookie `d` (`xoxd-...`)                                                                                                                                                                                                                                                     |
-| `SLACK_MCP_XOXP_TOKEN`            | Yes*      | `nil`                     | User OAuth token (`xoxp-...`) — alternative to xoxc/xoxd                                                                                                                                                                                                                                  |
+| `SLACK_MCP_XOXP_TOKEN`            | Yes*      | `nil`                     | User OAuth token (`xoxp-...`)                                                                                                                                                                                                                                                             |
 | `SLACK_MCP_PORT`                  | No        | `13080`                   | Port for the MCP server to listen on                                                                                                                                                                                                                                                      |
 | `SLACK_MCP_HOST`                  | No        | `127.0.0.1`               | Host for the MCP server to listen on                                                                                                                                                                                                                                                      |
 | `SLACK_MCP_API_KEY`           | No        | `nil`                     | Bearer token for SSE and HTTP transports                                                                                                                                                                                                                                                            |

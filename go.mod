@@ -9,16 +9,13 @@ require (
 	github.com/mattn/go-isatty v0.0.20
 	github.com/openai/openai-go v1.12.0
 	github.com/rusq/slack v0.9.6-0.20250408103104-dd80d1b6337f
-	github.com/rusq/slackauth v0.7.1
 	github.com/rusq/slackdump/v3 v3.1.13
-	github.com/rusq/tagops v0.1.1
 	github.com/slack-go/slack v0.19.0
 	github.com/stretchr/testify v1.11.1
 	github.com/takara2314/slack-go-util v0.3.0
 	go.uber.org/zap v1.27.1
 	golang.ngrok.com/ngrok/v2 v2.1.1
 	golang.org/x/net v0.51.0
-	golang.org/x/sync v0.19.0
 	golang.org/x/time v0.14.0
 )
 
@@ -71,6 +68,7 @@ require (
 	github.com/rogpeppe/go-internal v1.14.1 // indirect
 	github.com/rusq/chttp v1.1.0 // indirect
 	github.com/rusq/fsadapter v1.1.0 // indirect
+	github.com/rusq/slackauth v0.7.1 // indirect
 	github.com/spf13/cast v1.7.1 // indirect
 	github.com/tidwall/gjson v1.17.0 // indirect
 	github.com/tidwall/match v1.1.1 // indirect

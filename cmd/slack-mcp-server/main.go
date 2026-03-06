@@ -92,8 +92,8 @@ func main() {
 	go func() {
 		var once sync.Once
 
-		newUsersWatcher(p, &once, logger)()
 		newChannelsWatcher(p, &once, logger)()
+		newUsersWatcher(p, &once, logger)()
 	}()
 
 	// Require API key for network-facing transports (SSE/HTTP).
@@ -196,13 +196,6 @@ func newUsersWatcher(p *provider.ApiProvider, once *sync.Once, logger *zap.Logge
 			zap.String("context", "console"),
 		)
 
-		if os.Getenv("SLACK_MCP_XOXP_TOKEN") == "demo" || (os.Getenv("SLACK_MCP_XOXC_TOKEN") == "demo" && os.Getenv("SLACK_MCP_XOXD_TOKEN") == "demo") {
-			logger.Info("Demo credentials are set, skip",
-				zap.String("context", "console"),
-			)
-			return
-		}
-
 		err := p.RefreshUsers(context.Background())
 		if err != nil {
 			logger.Fatal("Error booting provider",
@@ -227,13 +220,6 @@ func newChannelsWatcher(p *provider.ApiProvider, once *sync.Once, logger *zap.Lo
 		logger.Info("Caching channels collection...",
 			zap.String("context", "console"),
 		)
-
-		if os.Getenv("SLACK_MCP_XOXP_TOKEN") == "demo" || (os.Getenv("SLACK_MCP_XOXC_TOKEN") == "demo" && os.Getenv("SLACK_MCP_XOXD_TOKEN") == "demo") {
-			logger.Info("Demo credentials are set, skip.",
-				zap.String("context", "console"),
-			)
-			return
-		}
 
 		err := p.RefreshChannels(context.Background())
 		if err != nil {

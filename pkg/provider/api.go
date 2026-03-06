@@ -15,7 +15,6 @@ import (
 	"time"
 
 	"github.com/korotovsky/slack-mcp-server/pkg/limiter"
-	"github.com/korotovsky/slack-mcp-server/pkg/provider/edge"
 	"github.com/korotovsky/slack-mcp-server/pkg/transport"
 	"github.com/rusq/slackdump/v3/auth"
 	"github.com/slack-go/slack"
@@ -114,13 +113,6 @@ func getMinRefreshInterval() time.Duration {
 // to prevent cache contamination when using multiple Slack workspaces.
 // Returns an error if authentication fails - the server should not start with invalid credentials.
 func validateAuthAndGetTeamID(authProvider auth.Provider, logger *zap.Logger) (string, error) {
-	xoxpToken := os.Getenv("SLACK_MCP_XOXP_TOKEN")
-	xoxcToken := os.Getenv("SLACK_MCP_XOXC_TOKEN")
-	xoxdToken := os.Getenv("SLACK_MCP_XOXD_TOKEN")
-	if xoxpToken == "demo" || (xoxcToken == "demo" && xoxdToken == "demo") {
-		return "demo", nil
-	}
-
 	httpClient := transport.ProvideHTTPClient(authProvider.Cookies(), logger)
 	slackOpts := []slack.Option{slack.OptionHTTPClient(httpClient)}
 	if os.Getenv("SLACK_MCP_GOVSLACK") == "true" {
@@ -208,12 +200,6 @@ type SlackAPI interface {
 	// non-member public channels and closed DMs that cannot have unreads.
 	GetConversationsForUserContext(ctx context.Context, params *slack.GetConversationsForUserParameters) ([]slack.Channel, string, error)
 
-	// Edge API methods
-	ClientUserBoot(ctx context.Context) (*edge.ClientUserBootResponse, error)
-	UsersSearch(ctx context.Context, query string, count int) ([]slack.User, error)
-	ClientCounts(ctx context.Context) (edge.ClientCountsResponse, error)
-	GetMutedChannels(ctx context.Context) (map[string]bool, error)
-
 	// User groups API methods
 	GetUserGroupsContext(ctx context.Context, options ...slack.GetUserGroupsOption) ([]slack.UserGroup, error)
 	GetUserGroupMembersContext(ctx context.Context, userGroup string, options ...slack.GetUserGroupMembersOption) ([]string, error)
@@ -224,7 +210,6 @@ type SlackAPI interface {
 
 type MCPSlackClient struct {
 	slackClient *slack.Client
-	edgeClient  *edge.Client
 
 	authResponse *slack.AuthTestResponse
 	authProvider auth.Provider
@@ -232,7 +217,6 @@ type MCPSlackClient struct {
 	isEnterprise bool
 	isOAuth      bool
 	isBotToken   bool
-	edgeFailed   atomic.Bool // set when edge API fails; subsequent calls skip straight to standard API
 	teamEndpoint string
 }
 
@@ -289,13 +273,6 @@ func NewMCPSlackClient(authProvider auth.Provider, logger *zap.Logger) (*MCPSlac
 		slack.OptionAPIURL(authResp.URL+"api/"),
 	)
 
-	edgeClient, err := edge.NewWithInfo(authResponse, authProvider,
-		edge.OptionHTTPClient(httpClient),
-	)
-	if err != nil {
-		return nil, err
-	}
-
 	isEnterprise := authResp.EnterpriseID != ""
 	token := authProvider.SlackToken()
 
@@ -307,7 +284,6 @@ func NewMCPSlackClient(authProvider auth.Provider, logger *zap.Logger) (*MCPSlac
 
 	return &MCPSlackClient{
 		slackClient:  slackClient,
-		edgeClient:   edgeClient,
 		authResponse: authResponse,
 		authProvider: authProvider,
 		isEnterprise: isEnterprise,
@@ -318,18 +294,6 @@ func NewMCPSlackClient(authProvider auth.Provider, logger *zap.Logger) (*MCPSlac
 }
 
 func (c *MCPSlackClient) AuthTest() (*slack.AuthTestResponse, error) {
-	if os.Getenv("SLACK_MCP_XOXP_TOKEN") == "demo" || (os.Getenv("SLACK_MCP_XOXC_TOKEN") == "demo" && os.Getenv("SLACK_MCP_XOXD_TOKEN") == "demo") {
-		return &slack.AuthTestResponse{
-			URL:          "https://_.slack.com",
-			Team:         "Demo Team",
-			User:         "Username",
-			TeamID:       "TEAM123456",
-			UserID:       "U1234567890",
-			EnterpriseID: "",
-			BotID:        "",
-		}, nil
-	}
-
 	if c.authResponse != nil {
 		return c.authResponse, nil
 	}
@@ -354,103 +318,6 @@ func (c *MCPSlackClient) MarkConversationContext(ctx context.Context, channel, t
 }
 
 func (c *MCPSlackClient) GetConversationsContext(ctx context.Context, params *slack.GetConversationsParameters) ([]slack.Channel, string, error) {
-	// Please see https://github.com/korotovsky/slack-mcp-server/issues/73
-	// It seems that `conversations.list` works with `xoxp` tokens within Enterprise Grid setups
-	// and if `xoxc`/`xoxd` defined we fallback to edge client.
-	// In non Enterprise Grid setups we always use `conversations.list` api as it accepts both token types wtf.
-	if c.isEnterprise {
-		if c.isOAuth {
-			return c.slackClient.GetConversationsContext(ctx, params)
-		}
-
-		// Enterprise + non-OAuth: try edge API first (for DMs, MPIMs, etc.),
-		// then supplement with standard API. The edge API may only return
-		// partial results (e.g., DMs succeed but SearchChannels fails on
-		// restricted teams), so we always merge both sources.
-		//
-		// The edge API returns all results in one shot (no pagination),
-		// while the standard API paginates. We fully paginate the standard
-		// API here and return a merged, deduplicated result set with an
-		// empty cursor so the caller doesn't need to re-paginate.
-		if !c.edgeFailed.Load() {
-			edgeChannels, _, edgeErr := c.edgeClient.GetConversationsContext(ctx, nil)
-			if edgeErr != nil {
-				c.edgeFailed.Store(true)
-				return c.slackClient.GetConversationsContext(ctx, params)
-			}
-
-			// Collect edge results into a map for deduplication.
-			seen := make(map[string]struct{}, len(edgeChannels))
-			var channels []slack.Channel
-			for _, ec := range edgeChannels {
-				if params != nil && params.ExcludeArchived && ec.IsArchived {
-					continue
-				}
-				seen[ec.ID] = struct{}{}
-				channels = append(channels, slack.Channel{
-					IsGeneral: ec.IsGeneral,
-					GroupConversation: slack.GroupConversation{
-						Conversation: slack.Conversation{
-							ID:                 ec.ID,
-							IsIM:               ec.IsIM,
-							IsMpIM:             ec.IsMpIM,
-							IsPrivate:          ec.IsPrivate,
-							Created:            slack.JSONTime(ec.Created.Time().UnixMilli()),
-							Unlinked:           ec.Unlinked,
-							NameNormalized:     ec.NameNormalized,
-							IsShared:           ec.IsShared,
-							IsExtShared:        ec.IsExtShared,
-							IsOrgShared:        ec.IsOrgShared,
-							IsPendingExtShared: ec.IsPendingExtShared,
-							NumMembers:         ec.NumMembers,
-						},
-						Name:       ec.Name,
-						IsArchived: ec.IsArchived,
-						Members:    ec.Members,
-						Topic: slack.Topic{
-							Value: ec.Topic.Value,
-						},
-						Purpose: slack.Purpose{
-							Value: ec.Purpose.Value,
-						},
-					},
-				})
-			}
-
-			// Supplement with ALL pages from the standard API to fill gaps
-			// the edge API missed (e.g., public/private channels on
-			// restricted teams where SearchChannels returns an error).
-			stdParams := &slack.GetConversationsParameters{
-				Limit:           999,
-				ExcludeArchived: true,
-			}
-			if params != nil {
-				stdParams.Types = params.Types
-			}
-			for {
-				stdChannels, nextCur, stdErr := c.slackClient.GetConversationsContext(ctx, stdParams)
-				if stdErr != nil {
-					break // standard API failed; keep what edge gave us
-				}
-				for _, sc := range stdChannels {
-					if _, ok := seen[sc.ID]; !ok {
-						seen[sc.ID] = struct{}{}
-						channels = append(channels, sc)
-					}
-				}
-				if nextCur == "" {
-					break
-				}
-				stdParams.Cursor = nextCur
-			}
-
-			return channels, "", nil
-		}
-
-		// Edge API previously failed — use standard API directly.
-		return c.slackClient.GetConversationsContext(ctx, params)
-	}
-
 	return c.slackClient.GetConversationsContext(ctx, params)
 }
 
@@ -502,22 +369,6 @@ func (c *MCPSlackClient) GetConversationInfoContext(ctx context.Context, input *
 	return c.slackClient.GetConversationInfoContext(ctx, input)
 }
 
-func (c *MCPSlackClient) ClientUserBoot(ctx context.Context) (*edge.ClientUserBootResponse, error) {
-	return c.edgeClient.ClientUserBoot(ctx)
-}
-
-func (c *MCPSlackClient) UsersSearch(ctx context.Context, query string, count int) ([]slack.User, error) {
-	return c.edgeClient.UsersSearch(ctx, query, count)
-}
-
-func (c *MCPSlackClient) ClientCounts(ctx context.Context) (edge.ClientCountsResponse, error) {
-	return c.edgeClient.ClientCounts(ctx)
-}
-
-func (c *MCPSlackClient) GetMutedChannels(ctx context.Context) (map[string]bool, error) {
-	return c.edgeClient.GetMutedChannels(ctx)
-}
-
 func (c *MCPSlackClient) GetUserGroupsContext(ctx context.Context, options ...slack.GetUserGroupsOption) ([]slack.UserGroup, error) {
 	return c.slackClient.GetUserGroupsContext(ctx, options...)
 }
@@ -554,17 +405,8 @@ func (c *MCPSlackClient) IsOAuth() bool {
 	return c.isOAuth
 }
 
-func (c *MCPSlackClient) Raw() struct {
-	Slack *slack.Client
-	Edge  *edge.Client
-} {
-	return struct {
-		Slack *slack.Client
-		Edge  *edge.Client
-	}{
-		Slack: c.slackClient,
-		Edge:  c.edgeClient,
-	}
+func (c *MCPSlackClient) Raw() *slack.Client {
+	return c.slackClient
 }
 
 func New(transport string, logger *zap.Logger) *ApiProvider {
@@ -576,8 +418,6 @@ func New(transport string, logger *zap.Logger) *ApiProvider {
 	// Read all environment variables
 	xoxpToken := os.Getenv("SLACK_MCP_XOXP_TOKEN")
 	xoxbToken := os.Getenv("SLACK_MCP_XOXB_TOKEN")
-	xoxcToken := os.Getenv("SLACK_MCP_XOXC_TOKEN")
-	xoxdToken := os.Getenv("SLACK_MCP_XOXD_TOKEN")
 
 	// Warn if both user and bot tokens are set
 	if xoxpToken != "" && xoxbToken != "" {
@@ -614,25 +454,11 @@ func New(transport string, logger *zap.Logger) *ApiProvider {
 		return newWithXOXB(transport, authProvider, logger)
 	}
 
-	// Priority 3: XOXC/XOXD tokens (session-based)
-	if xoxcToken == "" || xoxdToken == "" {
-		logger.Fatal("Authentication required: Either SLACK_MCP_XOXP_TOKEN, SLACK_MCP_XOXB_TOKEN, or both SLACK_MCP_XOXC_TOKEN and SLACK_MCP_XOXD_TOKEN must be provided")
-	}
-
-	authProvider, err = auth.NewValueAuth(xoxcToken, xoxdToken)
-	if err != nil {
-		logger.Fatal("Failed to create auth provider with XOXC/XOXD tokens", zap.Error(err))
-	}
-
-	return newWithXOXC(transport, authProvider, logger)
+	logger.Fatal("Authentication required: Either SLACK_MCP_XOXP_TOKEN or SLACK_MCP_XOXB_TOKEN must be provided")
+	return nil // unreachable, but satisfies the compiler
 }
 
 func newWithXOXP(transport string, authProvider auth.ValueAuth, logger *zap.Logger) *ApiProvider {
-	var (
-		client *MCPSlackClient
-		err    error
-	)
-
 	teamID, err := validateAuthAndGetTeamID(authProvider, logger)
 	if err != nil {
 		logger.Fatal("Authentication failed - check your Slack tokens", zap.Error(err))
@@ -648,13 +474,9 @@ func newWithXOXP(transport string, authProvider auth.ValueAuth, logger *zap.Logg
 		channelsCache = getCachePathWithTeamID(teamID, "channels_cache_v2.json")
 	}
 
-	if os.Getenv("SLACK_MCP_XOXP_TOKEN") == "demo" || (os.Getenv("SLACK_MCP_XOXC_TOKEN") == "demo" && os.Getenv("SLACK_MCP_XOXD_TOKEN") == "demo") {
-		logger.Info("Demo credentials are set, skip.")
-	} else {
-		client, err = NewMCPSlackClient(authProvider, logger)
-		if err != nil {
-			logger.Fatal("Failed to create MCP Slack client", zap.Error(err))
-		}
+	client, err := NewMCPSlackClient(authProvider, logger)
+	if err != nil {
+		logger.Fatal("Failed to create MCP Slack client", zap.Error(err))
 	}
 
 	ap := &ApiProvider{
@@ -682,63 +504,8 @@ func newWithXOXP(transport string, authProvider auth.ValueAuth, logger *zap.Logg
 }
 
 func newWithXOXB(transport string, authProvider auth.ValueAuth, logger *zap.Logger) *ApiProvider {
-	// Bot tokens do not support demo mode, but otherwise share the same
-	// initialization logic as user OAuth tokens.
+	// Bot tokens share the same initialization logic as user OAuth tokens.
 	return newWithXOXP(transport, authProvider, logger)
-}
-
-func newWithXOXC(transport string, authProvider auth.ValueAuth, logger *zap.Logger) *ApiProvider {
-	var (
-		client *MCPSlackClient
-		err    error
-	)
-
-	teamID, err := validateAuthAndGetTeamID(authProvider, logger)
-	if err != nil {
-		logger.Fatal("Authentication failed - check your Slack tokens", zap.Error(err))
-	}
-
-	usersCache := os.Getenv("SLACK_MCP_USERS_CACHE")
-	if usersCache == "" {
-		usersCache = getCachePathWithTeamID(teamID, "users_cache.json")
-	}
-
-	channelsCache := os.Getenv("SLACK_MCP_CHANNELS_CACHE")
-	if channelsCache == "" {
-		channelsCache = getCachePathWithTeamID(teamID, "channels_cache_v2.json")
-	}
-
-	if os.Getenv("SLACK_MCP_XOXP_TOKEN") == "demo" || (os.Getenv("SLACK_MCP_XOXC_TOKEN") == "demo" && os.Getenv("SLACK_MCP_XOXD_TOKEN") == "demo") {
-		logger.Info("Demo credentials are set, skip.")
-	} else {
-		client, err = NewMCPSlackClient(authProvider, logger)
-		if err != nil {
-			logger.Fatal("Failed to create MCP Slack client", zap.Error(err))
-		}
-	}
-
-	ap := &ApiProvider{
-		transport: transport,
-		client:    client,
-		logger:    logger,
-
-		rateLimiter:        limiter.Tier2.Limiter(),
-		cacheTTL:           getCacheTTL(),
-		minRefreshInterval: getMinRefreshInterval(),
-
-		usersCachePath:    usersCache,
-		channelsCachePath: channelsCache,
-	}
-	// Initialize with empty snapshots
-	ap.usersSnapshot.Store(&UsersCache{
-		Users:    make(map[string]slack.User),
-		UsersInv: make(map[string]string),
-	})
-	ap.channelsSnapshot.Store(&ChannelsCache{
-		Channels:    make(map[string]Channel),
-		ChannelsInv: make(map[string]string),
-	})
-	return ap
 }
 
 func (ap *ApiProvider) RefreshUsers(ctx context.Context) error {
@@ -1013,23 +780,26 @@ func (ap *ApiProvider) refreshChannelsInternal(ctx context.Context, force bool) 
 	return nil
 }
 
+// GetSlackConnect finds external users from Slack Connect shared DMs.
+// It scans the channels cache for shared/ext_shared IM channels and fetches
+// user info for any user IDs not already in the users cache.
 func (ap *ApiProvider) GetSlackConnect(ctx context.Context) ([]slack.User, error) {
-	boot, err := ap.client.ClientUserBoot(ctx)
-	if err != nil {
-		ap.logger.Error("Failed to fetch client user boot", zap.Error(err))
-		return nil, err
-	}
-
+	channelsSnapshot := ap.channelsSnapshot.Load()
 	usersSnapshot := ap.usersSnapshot.Load()
+
 	var collectedIDs []string
-	for _, im := range boot.IMs {
-		if !im.IsShared && !im.IsExtShared {
+	for _, ch := range channelsSnapshot.Channels {
+		if !ch.IsIM {
 			continue
 		}
-
-		_, ok := usersSnapshot.Users[im.User]
-		if !ok {
-			collectedIDs = append(collectedIDs, im.User)
+		if !ch.IsExtShared {
+			continue
+		}
+		if ch.User == "" {
+			continue
+		}
+		if _, ok := usersSnapshot.Users[ch.User]; !ok {
+			collectedIDs = append(collectedIDs, ch.User)
 		}
 	}
 
@@ -1195,14 +965,9 @@ func (ap *ApiProvider) IsOAuth() bool {
 }
 
 // SearchUsers searches for users by name, email, or display name.
-// For OAuth tokens (xoxp/xoxb), it searches the local users cache using regex matching.
-// For browser tokens (xoxc/xoxd), it uses the edge API's UsersSearch method.
+// It searches the local users cache using regex matching.
 func (ap *ApiProvider) SearchUsers(ctx context.Context, query string, limit int) ([]slack.User, error) {
-	if ap.IsOAuth() {
-		return ap.searchUsersInCache(query, limit)
-	}
-
-	return ap.client.UsersSearch(ctx, query, limit)
+	return ap.searchUsersInCache(query, limit)
 }
 
 // searchUsersInCache performs a case-insensitive regex search on cached users.
