@@ -1903,7 +1903,10 @@ func (ch *ConversationsHandler) parseParamsToolSearch(req mcp.CallToolRequest) (
 	}
 
 	finalQuery := buildQuery(freeText, filters)
-	limit := req.GetInt("limit", 100)
+	limit := req.GetInt("limit", 20)
+	if limit > 100 {
+		limit = 100
+	}
 	cursor := req.GetString("cursor", "")
 
 	var (
@@ -2015,6 +2018,9 @@ func limitByNumeric(limit string, defaultLimit int) (int, error) {
 	n, err := strconv.Atoi(limit)
 	if err != nil {
 		return 0, fmt.Errorf("invalid numeric limit: %q", limit)
+	}
+	if n > 1000 {
+		n = 1000
 	}
 	return n, nil
 }
