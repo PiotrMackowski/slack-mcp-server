@@ -40,7 +40,7 @@ func (t tokenAuth) Cookies() []*http.Cookie { return nil }
 
 const usersNotReadyMsg = "users cache is not ready yet, sync process is still running... please wait"
 const channelsNotReadyMsg = "channels cache is not ready yet, sync process is still running... please wait"
-const defaultCacheTTL = 1 * time.Hour
+const defaultCacheTTL = 24 * time.Hour
 const defaultMinRefreshInterval = 30 * time.Second
 
 var AllChanTypes = []string{"mpim", "im", "public_channel", "private_channel"}
