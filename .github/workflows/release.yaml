@@ -1,4 +1,4 @@
-name: Release NPM
+name: Release
 
 on:
   push:
@@ -24,14 +24,8 @@ jobs:
         with:
           go-version-file: "go.mod"
 
-      - name: Install dependencies
-        run: npm install -g @anthropic-ai/dxt@0.2.6
-
       - name: Build binaries
         run: make build-all-platforms
-
-      - name: Build DTX Extension
-        run: make build-dxt
 
       - name: Upload artifacts
         uses: softprops/action-gh-release@153bb8e04406b158c6c84fc1615b65b24149a1fe # v2
@@ -41,12 +35,4 @@ jobs:
           files: |
             LICENSE
             build/slack-mcp-server-*
-            build/slack-mcp-server.dxt
             .env.dist
-            docker-compose.yml
-
-      - name: Publish npm
-        env:
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run:
-          make npm-publish
