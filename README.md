@@ -1,4 +1,4 @@
-# Slack MCP Server (Allegro Security Fork)
+# Slack MCP Server (Hardened Fork)
 
 Hardened fork of [korotovsky/slack-mcp-server](https://github.com/korotovsky/slack-mcp-server) — a Go-based [Model Context Protocol](https://modelcontextprotocol.io/) server for Slack workspaces. Supports stdio, SSE, and HTTP transports.
 
