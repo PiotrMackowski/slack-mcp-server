@@ -51,6 +51,16 @@ var ErrUsersNotReady = errors.New(usersNotReadyMsg)
 var ErrChannelsNotReady = errors.New(channelsNotReadyMsg)
 var ErrRefreshRateLimited = errors.New("refresh skipped due to rate limiting")
 
+// atomicWriteFile writes data to a file atomically by writing to a temporary
+// file first and then renaming it. This prevents corruption from concurrent writes.
+func atomicWriteFile(path string, data []byte, perm os.FileMode) error {
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, data, perm); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
+}
+
 // getCacheDir returns the appropriate cache directory for slack-mcp-server
 func getCacheDir() string {
 	cacheDir, err := os.UserCacheDir()
@@ -525,72 +535,64 @@ func (ap *ApiProvider) ForceRefreshUsers(ctx context.Context) error {
 	return ap.refreshUsersInternal(ctx, true)
 }
 
-func (ap *ApiProvider) refreshUsersInternal(ctx context.Context, force bool) error {
-	ap.usersMu.Lock()
-	defer ap.usersMu.Unlock()
-
-	var (
-		list        []slack.User
-		optionLimit = slack.GetUsersOptionLimit(1000)
-	)
-
-	// Check if we should use cache (not forced, cache exists, and within TTL)
-	if !force {
-		if data, err := os.ReadFile(ap.usersCachePath); err == nil {
-			var cachedUsers []slack.User
-			if err := json.Unmarshal(data, &cachedUsers); err != nil {
-				ap.logger.Warn("Failed to unmarshal users cache, will refetch",
-					zap.String("cache_file", ap.usersCachePath),
-					zap.Error(err))
-			} else if len(cachedUsers) == 0 {
-				ap.logger.Warn("Users cache is empty or null, will refetch",
-					zap.String("cache_file", ap.usersCachePath))
-			} else {
-				// Check cache TTL using file modification time
-				cacheValid := true
-				if ap.cacheTTL > 0 {
-					if fileInfo, err := os.Stat(ap.usersCachePath); err == nil {
-						cacheAge := time.Since(fileInfo.ModTime())
-						if cacheAge > ap.cacheTTL {
-							ap.logger.Info("Users cache expired, will refetch",
-								zap.Duration("cache_age", cacheAge),
-								zap.Duration("ttl", ap.cacheTTL),
-								zap.String("cache_file", ap.usersCachePath))
-							cacheValid = false
-						}
-					}
-				}
-
-				if cacheValid {
-					// Build new snapshot from cache
-					newSnapshot := &UsersCache{
-						Users:    make(map[string]slack.User, len(cachedUsers)),
-						UsersInv: make(map[string]string, len(cachedUsers)),
-					}
-					for _, u := range cachedUsers {
-						newSnapshot.Users[u.ID] = u
-						newSnapshot.UsersInv[u.Name] = u.ID
-					}
-					ap.usersSnapshot.Store(newSnapshot)
-					ap.logger.Info("Loaded users from cache",
-						zap.Int("count", len(cachedUsers)),
-						zap.String("cache_file", ap.usersCachePath))
-					ap.usersReady.Store(true)
-					return nil
-				}
-			}
-		}
+// loadUsersCacheFromDisk reads and parses the users cache file, returning the
+// parsed users list or nil if the file doesn't exist or is invalid.
+func (ap *ApiProvider) loadUsersCacheFromDisk() []slack.User {
+	data, err := os.ReadFile(ap.usersCachePath)
+	if err != nil {
+		return nil
 	}
+	var cachedUsers []slack.User
+	if err := json.Unmarshal(data, &cachedUsers); err != nil {
+		ap.logger.Warn("Failed to unmarshal users cache, will refetch",
+			zap.String("cache_file", ap.usersCachePath),
+			zap.Error(err))
+		return nil
+	}
+	if len(cachedUsers) == 0 {
+		ap.logger.Warn("Users cache is empty or null, will refetch",
+			zap.String("cache_file", ap.usersCachePath))
+		return nil
+	}
+	return cachedUsers
+}
 
-	// Fetch fresh data from Slack API
-	users, err := ap.client.GetUsersContext(ctx,
-		optionLimit,
-	)
+// storeUsersFromList builds an in-memory snapshot from a users list and stores it atomically.
+func (ap *ApiProvider) storeUsersFromList(cachedUsers []slack.User) {
+	newSnapshot := &UsersCache{
+		Users:    make(map[string]slack.User, len(cachedUsers)),
+		UsersInv: make(map[string]string, len(cachedUsers)),
+	}
+	for _, u := range cachedUsers {
+		newSnapshot.Users[u.ID] = u
+		newSnapshot.UsersInv[u.Name] = u.ID
+	}
+	ap.usersSnapshot.Store(newSnapshot)
+}
+
+// isUsersCacheExpired checks whether the on-disk users cache has exceeded its TTL.
+func (ap *ApiProvider) isUsersCacheExpired() bool {
+	if ap.cacheTTL == 0 {
+		return false
+	}
+	fileInfo, err := os.Stat(ap.usersCachePath)
+	if err != nil {
+		return true
+	}
+	return time.Since(fileInfo.ModTime()) > ap.cacheTTL
+}
+
+// fetchAndStoreUsers fetches fresh user data from the Slack API and updates
+// both the in-memory snapshot and the on-disk cache file.
+func (ap *ApiProvider) fetchAndStoreUsers(ctx context.Context) error {
+	optionLimit := slack.GetUsersOptionLimit(1000)
+
+	users, err := ap.client.GetUsersContext(ctx, optionLimit)
 	if err != nil {
 		ap.logger.Error("Failed to fetch users", zap.Error(err))
 		return err
 	}
-	list = append(list, users...)
+	list := append([]slack.User{}, users...)
 
 	// Build new snapshot
 	newSnapshot := &UsersCache{
@@ -633,7 +635,7 @@ func (ap *ApiProvider) refreshUsersInternal(ctx context.Context, force bool) err
 	if data, err := json.MarshalIndent(list, "", "  "); err != nil {
 		ap.logger.Error("Failed to marshal users for cache", zap.Error(err))
 	} else {
-		if err := os.WriteFile(ap.usersCachePath, data, 0600); err != nil {
+		if err := atomicWriteFile(ap.usersCachePath, data, 0600); err != nil {
 			ap.logger.Error("Failed to write cache file",
 				zap.String("cache_file", ap.usersCachePath),
 				zap.Error(err))
@@ -644,8 +646,53 @@ func (ap *ApiProvider) refreshUsersInternal(ctx context.Context, force bool) err
 		}
 	}
 
-	ap.usersReady.Store(true)
+	return nil
+}
 
+func (ap *ApiProvider) refreshUsersInternal(ctx context.Context, force bool) error {
+	ap.usersMu.Lock()
+	defer ap.usersMu.Unlock()
+
+	// Check if we should use cache (not forced, cache exists, and within TTL)
+	if !force {
+		cachedUsers := ap.loadUsersCacheFromDisk()
+		if cachedUsers != nil {
+			expired := ap.isUsersCacheExpired()
+
+			if expired {
+				// Stale-while-revalidate: serve stale data immediately, refresh in background.
+				// This prevents MCP auth timeouts caused by blocking on Slack API during startup.
+				ap.storeUsersFromList(cachedUsers)
+				ap.usersReady.Store(true)
+				ap.logger.Info("Loaded stale users from cache, refreshing in background",
+					zap.Int("count", len(cachedUsers)),
+					zap.String("cache_file", ap.usersCachePath))
+
+				go func() {
+					if err := ap.fetchAndStoreUsers(context.Background()); err != nil {
+						ap.logger.Error("Background users refresh failed", zap.Error(err))
+					} else {
+						ap.logger.Info("Background users refresh completed")
+					}
+				}()
+				return nil
+			}
+
+			// Cache is fresh — use it directly
+			ap.storeUsersFromList(cachedUsers)
+			ap.logger.Info("Loaded users from cache",
+				zap.Int("count", len(cachedUsers)),
+				zap.String("cache_file", ap.usersCachePath))
+			ap.usersReady.Store(true)
+			return nil
+		}
+	}
+
+	// No usable cache — fetch synchronously (first run or force refresh)
+	if err := ap.fetchAndStoreUsers(ctx); err != nil {
+		return err
+	}
+	ap.usersReady.Store(true)
 	return nil
 }
 
@@ -678,73 +725,69 @@ func (ap *ApiProvider) ForceRefreshChannels(ctx context.Context) error {
 	return ap.refreshChannelsInternal(ctx, true)
 }
 
-func (ap *ApiProvider) refreshChannelsInternal(ctx context.Context, force bool) error {
-	ap.channelsMu.Lock()
-	defer ap.channelsMu.Unlock()
+// loadChannelsCacheFromDisk reads and parses the channels cache file, returning the
+// parsed channels list or nil if the file doesn't exist or is invalid.
+func (ap *ApiProvider) loadChannelsCacheFromDisk() []Channel {
+	data, err := os.ReadFile(ap.channelsCachePath)
+	if err != nil {
+		return nil
+	}
+	var cachedChannels []Channel
+	if err := json.Unmarshal(data, &cachedChannels); err != nil {
+		ap.logger.Warn("Failed to unmarshal channels cache, will refetch",
+			zap.String("cache_file", ap.channelsCachePath),
+			zap.Error(err))
+		return nil
+	}
+	if len(cachedChannels) == 0 {
+		ap.logger.Warn("Channels cache is empty or null, will refetch",
+			zap.String("cache_file", ap.channelsCachePath))
+		return nil
+	}
+	return cachedChannels
+}
 
-	// Check if we should use cache (not forced, cache exists, and within TTL)
-	if !force {
-		if data, err := os.ReadFile(ap.channelsCachePath); err == nil {
-			var cachedChannels []Channel
-			if err := json.Unmarshal(data, &cachedChannels); err != nil {
-				ap.logger.Warn("Failed to unmarshal channels cache, will refetch",
-					zap.String("cache_file", ap.channelsCachePath),
-					zap.Error(err))
-			} else if len(cachedChannels) == 0 {
-				ap.logger.Warn("Channels cache is empty or null, will refetch",
-					zap.String("cache_file", ap.channelsCachePath))
-			} else {
-				// Check cache TTL using file modification time
-				cacheValid := true
-				if ap.cacheTTL > 0 {
-					if fileInfo, err := os.Stat(ap.channelsCachePath); err == nil {
-						cacheAge := time.Since(fileInfo.ModTime())
-						if cacheAge > ap.cacheTTL {
-							ap.logger.Info("Channels cache expired, will refetch",
-								zap.Duration("cache_age", cacheAge),
-								zap.Duration("ttl", ap.cacheTTL),
-								zap.String("cache_file", ap.channelsCachePath))
-							cacheValid = false
-						}
-					}
-				}
-
-				if cacheValid {
-					// Re-map channels with current users cache to ensure DM names are populated
-					usersMap := ap.ProvideUsersMap().Users
-					newSnapshot := &ChannelsCache{
-						Channels:    make(map[string]Channel, len(cachedChannels)),
-						ChannelsInv: make(map[string]string, len(cachedChannels)),
-					}
-					for _, c := range cachedChannels {
-						// For IM channels, re-generate the name and purpose using current users cache
-						if c.IsIM {
-							// Re-map the channel to get updated user name if available
-							remappedChannel := mapChannel(
-								c.ID, "", "", c.Topic, c.Purpose,
-								c.User, c.Members, c.MemberCount,
-								c.IsIM, c.IsMpIM, c.IsPrivate, c.IsExtShared,
-								usersMap,
-							)
-							newSnapshot.Channels[c.ID] = remappedChannel
-							newSnapshot.ChannelsInv[remappedChannel.Name] = c.ID
-						} else {
-							newSnapshot.Channels[c.ID] = c
-							newSnapshot.ChannelsInv[c.Name] = c.ID
-						}
-					}
-					ap.channelsSnapshot.Store(newSnapshot)
-					ap.logger.Info("Loaded channels from cache and re-mapped DM names",
-						zap.Int("count", len(cachedChannels)),
-						zap.String("cache_file", ap.channelsCachePath))
-					ap.channelsReady.Store(true)
-					return nil
-				}
-			}
+// storeChannelsFromList builds an in-memory snapshot from a channels list and stores it atomically.
+func (ap *ApiProvider) storeChannelsFromList(cachedChannels []Channel) {
+	usersMap := ap.ProvideUsersMap().Users
+	newSnapshot := &ChannelsCache{
+		Channels:    make(map[string]Channel, len(cachedChannels)),
+		ChannelsInv: make(map[string]string, len(cachedChannels)),
+	}
+	for _, c := range cachedChannels {
+		// For IM channels, re-generate the name and purpose using current users cache
+		if c.IsIM {
+			remappedChannel := mapChannel(
+				c.ID, "", "", c.Topic, c.Purpose,
+				c.User, c.Members, c.MemberCount,
+				c.IsIM, c.IsMpIM, c.IsPrivate, c.IsExtShared,
+				usersMap,
+			)
+			newSnapshot.Channels[c.ID] = remappedChannel
+			newSnapshot.ChannelsInv[remappedChannel.Name] = c.ID
+		} else {
+			newSnapshot.Channels[c.ID] = c
+			newSnapshot.ChannelsInv[c.Name] = c.ID
 		}
 	}
+	ap.channelsSnapshot.Store(newSnapshot)
+}
 
-	// Fetch fresh data from Slack API
+// isChannelsCacheExpired checks whether the on-disk channels cache has exceeded its TTL.
+func (ap *ApiProvider) isChannelsCacheExpired() bool {
+	if ap.cacheTTL == 0 {
+		return false
+	}
+	fileInfo, err := os.Stat(ap.channelsCachePath)
+	if err != nil {
+		return true
+	}
+	return time.Since(fileInfo.ModTime()) > ap.cacheTTL
+}
+
+// fetchAndStoreChannels fetches fresh channel data from the Slack API and updates
+// both the in-memory snapshot and the on-disk cache file.
+func (ap *ApiProvider) fetchAndStoreChannels(ctx context.Context) error {
 	channels := ap.GetChannels(ctx, AllChanTypes)
 
 	if len(channels) == 0 {
@@ -753,7 +796,7 @@ func (ap *ApiProvider) refreshChannelsInternal(ctx context.Context, force bool) 
 	} else if data, err := json.MarshalIndent(channels, "", "  "); err != nil {
 		ap.logger.Error("Failed to marshal channels for cache", zap.Error(err))
 	} else {
-		if err := os.WriteFile(ap.channelsCachePath, data, 0600); err != nil {
+		if err := atomicWriteFile(ap.channelsCachePath, data, 0600); err != nil {
 			ap.logger.Error("Failed to write cache file",
 				zap.String("cache_file", ap.channelsCachePath),
 				zap.Error(err))
@@ -764,8 +807,53 @@ func (ap *ApiProvider) refreshChannelsInternal(ctx context.Context, force bool) 
 		}
 	}
 
-	ap.channelsReady.Store(true)
+	return nil
+}
 
+func (ap *ApiProvider) refreshChannelsInternal(ctx context.Context, force bool) error {
+	ap.channelsMu.Lock()
+	defer ap.channelsMu.Unlock()
+
+	// Check if we should use cache (not forced, cache exists, and within TTL)
+	if !force {
+		cachedChannels := ap.loadChannelsCacheFromDisk()
+		if cachedChannels != nil {
+			expired := ap.isChannelsCacheExpired()
+
+			if expired {
+				// Stale-while-revalidate: serve stale data immediately, refresh in background.
+				// This prevents MCP auth timeouts caused by blocking on Slack API during startup.
+				ap.storeChannelsFromList(cachedChannels)
+				ap.channelsReady.Store(true)
+				ap.logger.Info("Loaded stale channels from cache, refreshing in background",
+					zap.Int("count", len(cachedChannels)),
+					zap.String("cache_file", ap.channelsCachePath))
+
+				go func() {
+					if err := ap.fetchAndStoreChannels(context.Background()); err != nil {
+						ap.logger.Error("Background channels refresh failed", zap.Error(err))
+					} else {
+						ap.logger.Info("Background channels refresh completed")
+					}
+				}()
+				return nil
+			}
+
+			// Cache is fresh — use it directly
+			ap.storeChannelsFromList(cachedChannels)
+			ap.logger.Info("Loaded channels from cache and re-mapped DM names",
+				zap.Int("count", len(cachedChannels)),
+				zap.String("cache_file", ap.channelsCachePath))
+			ap.channelsReady.Store(true)
+			return nil
+		}
+	}
+
+	// No usable cache — fetch synchronously (first run or force refresh)
+	if err := ap.fetchAndStoreChannels(ctx); err != nil {
+		return err
+	}
+	ap.channelsReady.Store(true)
 	return nil
 }
 

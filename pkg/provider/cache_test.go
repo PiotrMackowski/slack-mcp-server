@@ -7,8 +7,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/slack-go/slack"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
 )
 
 // TestGetCacheTTL tests the app-specific logic in getCacheTTL:
@@ -256,12 +258,12 @@ func TestChannelIDPatterns(t *testing.T) {
 		channel string
 		needs   bool
 	}{
-		{"C1234567890", false},  // Standard channel ID
-		{"G1234567890", false},  // Private channel ID (legacy)
-		{"D1234567890", false},  // DM ID
-		{"#general", true},      // Channel name - needs lookup
-		{"@john.doe", true},     // User DM name - needs lookup
-		{"", false},             // Empty - no lookup
+		{"C1234567890", false}, // Standard channel ID
+		{"G1234567890", false}, // Private channel ID (legacy)
+		{"D1234567890", false}, // DM ID
+		{"#general", true},     // Channel name - needs lookup
+		{"@john.doe", true},    // User DM name - needs lookup
+		{"", false},            // Empty - no lookup
 	}
 
 	for _, tt := range tests {
@@ -379,4 +381,289 @@ func TestGetMinRefreshInterval(t *testing.T) {
 			assert.Equal(t, tt.expected, result)
 		})
 	}
+}
+
+// TestUnitAtomicWriteFile verifies that atomicWriteFile writes content atomically
+// via a temp file + rename, preventing corruption from concurrent writes.
+func TestUnitAtomicWriteFile(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "slack-mcp-atomic-write-test")
+	require.NoError(t, err)
+	defer os.RemoveAll(tempDir)
+
+	t.Run("writes file correctly", func(t *testing.T) {
+		path := filepath.Join(tempDir, "test.json")
+		content := []byte(`{"key":"value"}`)
+		err := atomicWriteFile(path, content, 0600)
+		require.NoError(t, err)
+
+		data, err := os.ReadFile(path)
+		require.NoError(t, err)
+		assert.Equal(t, content, data)
+	})
+
+	t.Run("overwrites existing file", func(t *testing.T) {
+		path := filepath.Join(tempDir, "overwrite.json")
+		err := os.WriteFile(path, []byte("old"), 0600)
+		require.NoError(t, err)
+
+		newContent := []byte("new content")
+		err = atomicWriteFile(path, newContent, 0600)
+		require.NoError(t, err)
+
+		data, err := os.ReadFile(path)
+		require.NoError(t, err)
+		assert.Equal(t, newContent, data)
+	})
+
+	t.Run("no temp file left behind on success", func(t *testing.T) {
+		path := filepath.Join(tempDir, "clean.json")
+		err := atomicWriteFile(path, []byte("data"), 0600)
+		require.NoError(t, err)
+
+		_, err = os.Stat(path + ".tmp")
+		assert.True(t, os.IsNotExist(err), "temp file should be removed after rename")
+	})
+}
+
+// TestUnitLoadUsersCacheFromDisk verifies cache loading and parsing from disk.
+func TestUnitLoadUsersCacheFromDisk(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "slack-mcp-users-cache-test")
+	require.NoError(t, err)
+	defer os.RemoveAll(tempDir)
+
+	ap := &ApiProvider{
+		logger:         testLogger(),
+		usersCachePath: filepath.Join(tempDir, "users.json"),
+	}
+	ap.usersSnapshot.Store(&UsersCache{
+		Users:    make(map[string]slack.User),
+		UsersInv: make(map[string]string),
+	})
+
+	t.Run("returns nil when file does not exist", func(t *testing.T) {
+		result := ap.loadUsersCacheFromDisk()
+		assert.Nil(t, result)
+	})
+
+	t.Run("returns nil for invalid JSON", func(t *testing.T) {
+		err := os.WriteFile(ap.usersCachePath, []byte("not json"), 0600)
+		require.NoError(t, err)
+		result := ap.loadUsersCacheFromDisk()
+		assert.Nil(t, result)
+	})
+
+	t.Run("returns nil for empty array", func(t *testing.T) {
+		err := os.WriteFile(ap.usersCachePath, []byte("[]"), 0600)
+		require.NoError(t, err)
+		result := ap.loadUsersCacheFromDisk()
+		assert.Nil(t, result)
+	})
+
+	t.Run("returns nil for null JSON", func(t *testing.T) {
+		err := os.WriteFile(ap.usersCachePath, []byte("null"), 0600)
+		require.NoError(t, err)
+		result := ap.loadUsersCacheFromDisk()
+		assert.Nil(t, result)
+	})
+
+	t.Run("returns users for valid cache", func(t *testing.T) {
+		users := []slack.User{
+			{ID: "U001", Name: "alice"},
+			{ID: "U002", Name: "bob"},
+		}
+		data, err := json.Marshal(users)
+		require.NoError(t, err)
+		err = os.WriteFile(ap.usersCachePath, data, 0600)
+		require.NoError(t, err)
+
+		result := ap.loadUsersCacheFromDisk()
+		require.NotNil(t, result)
+		assert.Len(t, result, 2)
+		assert.Equal(t, "U001", result[0].ID)
+		assert.Equal(t, "U002", result[1].ID)
+	})
+}
+
+// TestUnitStoreUsersFromList verifies that storeUsersFromList builds correct
+// in-memory snapshots with both forward and inverse maps.
+func TestUnitStoreUsersFromList(t *testing.T) {
+	ap := &ApiProvider{}
+	ap.usersSnapshot.Store(&UsersCache{
+		Users:    make(map[string]slack.User),
+		UsersInv: make(map[string]string),
+	})
+
+	users := []slack.User{
+		{ID: "U001", Name: "alice"},
+		{ID: "U002", Name: "bob"},
+	}
+
+	ap.storeUsersFromList(users)
+
+	snapshot := ap.usersSnapshot.Load()
+	assert.Len(t, snapshot.Users, 2)
+	assert.Equal(t, "alice", snapshot.Users["U001"].Name)
+	assert.Equal(t, "bob", snapshot.Users["U002"].Name)
+	assert.Equal(t, "U001", snapshot.UsersInv["alice"])
+	assert.Equal(t, "U002", snapshot.UsersInv["bob"])
+}
+
+// TestUnitIsUsersCacheExpired verifies TTL-based expiration logic.
+func TestUnitIsUsersCacheExpired(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "slack-mcp-expiry-test")
+	require.NoError(t, err)
+	defer os.RemoveAll(tempDir)
+
+	cacheFile := filepath.Join(tempDir, "users.json")
+	ap := &ApiProvider{
+		usersCachePath: cacheFile,
+		cacheTTL:       1 * time.Hour,
+	}
+
+	t.Run("expired when file does not exist", func(t *testing.T) {
+		assert.True(t, ap.isUsersCacheExpired())
+	})
+
+	t.Run("not expired for fresh file", func(t *testing.T) {
+		err := os.WriteFile(cacheFile, []byte("[]"), 0600)
+		require.NoError(t, err)
+		assert.False(t, ap.isUsersCacheExpired())
+	})
+
+	t.Run("expired for old file", func(t *testing.T) {
+		oldTime := time.Now().Add(-2 * time.Hour)
+		err := os.Chtimes(cacheFile, oldTime, oldTime)
+		require.NoError(t, err)
+		assert.True(t, ap.isUsersCacheExpired())
+	})
+
+	t.Run("never expired when TTL is 0", func(t *testing.T) {
+		ap.cacheTTL = 0
+		assert.False(t, ap.isUsersCacheExpired())
+		ap.cacheTTL = 1 * time.Hour // restore
+	})
+}
+
+// TestUnitLoadChannelsCacheFromDisk verifies channels cache loading and parsing.
+func TestUnitLoadChannelsCacheFromDisk(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "slack-mcp-channels-cache-test")
+	require.NoError(t, err)
+	defer os.RemoveAll(tempDir)
+
+	ap := &ApiProvider{
+		logger:            testLogger(),
+		channelsCachePath: filepath.Join(tempDir, "channels.json"),
+	}
+
+	t.Run("returns nil when file does not exist", func(t *testing.T) {
+		result := ap.loadChannelsCacheFromDisk()
+		assert.Nil(t, result)
+	})
+
+	t.Run("returns nil for invalid JSON", func(t *testing.T) {
+		err := os.WriteFile(ap.channelsCachePath, []byte("{broken"), 0600)
+		require.NoError(t, err)
+		result := ap.loadChannelsCacheFromDisk()
+		assert.Nil(t, result)
+	})
+
+	t.Run("returns nil for empty array", func(t *testing.T) {
+		err := os.WriteFile(ap.channelsCachePath, []byte("[]"), 0600)
+		require.NoError(t, err)
+		result := ap.loadChannelsCacheFromDisk()
+		assert.Nil(t, result)
+	})
+
+	t.Run("returns channels for valid cache", func(t *testing.T) {
+		channels := []Channel{
+			{ID: "C001", Name: "#general"},
+			{ID: "C002", Name: "#random"},
+		}
+		data, err := json.Marshal(channels)
+		require.NoError(t, err)
+		err = os.WriteFile(ap.channelsCachePath, data, 0600)
+		require.NoError(t, err)
+
+		result := ap.loadChannelsCacheFromDisk()
+		require.NotNil(t, result)
+		assert.Len(t, result, 2)
+		assert.Equal(t, "C001", result[0].ID)
+	})
+}
+
+// TestUnitStoreChannelsFromList verifies that storeChannelsFromList builds
+// correct in-memory snapshots with re-mapped DM names.
+func TestUnitStoreChannelsFromList(t *testing.T) {
+	ap := &ApiProvider{}
+	// Pre-populate users so DM names can be resolved
+	ap.usersSnapshot.Store(&UsersCache{
+		Users: map[string]slack.User{
+			"U001": {ID: "U001", Name: "alice", RealName: "Alice Smith"},
+		},
+		UsersInv: map[string]string{"alice": "U001"},
+	})
+	ap.channelsSnapshot.Store(&ChannelsCache{
+		Channels:    make(map[string]Channel),
+		ChannelsInv: make(map[string]string),
+	})
+
+	channels := []Channel{
+		{ID: "C001", Name: "#general"},
+		{ID: "D001", Name: "@U001", IsIM: true, User: "U001"},
+	}
+
+	ap.storeChannelsFromList(channels)
+
+	snapshot := ap.channelsSnapshot.Load()
+	assert.Len(t, snapshot.Channels, 2)
+
+	// Public channel stored as-is
+	assert.Equal(t, "#general", snapshot.Channels["C001"].Name)
+	assert.Equal(t, "C001", snapshot.ChannelsInv["#general"])
+
+	// IM channel re-mapped using users cache
+	dm := snapshot.Channels["D001"]
+	assert.Equal(t, "@alice", dm.Name)
+	assert.Equal(t, "DM with Alice Smith", dm.Purpose)
+	assert.Equal(t, "D001", snapshot.ChannelsInv["@alice"])
+}
+
+// TestUnitIsChannelsCacheExpired verifies TTL-based channel cache expiration.
+func TestUnitIsChannelsCacheExpired(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "slack-mcp-ch-expiry-test")
+	require.NoError(t, err)
+	defer os.RemoveAll(tempDir)
+
+	cacheFile := filepath.Join(tempDir, "channels.json")
+	ap := &ApiProvider{
+		channelsCachePath: cacheFile,
+		cacheTTL:          1 * time.Hour,
+	}
+
+	t.Run("expired when file does not exist", func(t *testing.T) {
+		assert.True(t, ap.isChannelsCacheExpired())
+	})
+
+	t.Run("not expired for fresh file", func(t *testing.T) {
+		err := os.WriteFile(cacheFile, []byte("[]"), 0600)
+		require.NoError(t, err)
+		assert.False(t, ap.isChannelsCacheExpired())
+	})
+
+	t.Run("expired for old file", func(t *testing.T) {
+		oldTime := time.Now().Add(-2 * time.Hour)
+		err := os.Chtimes(cacheFile, oldTime, oldTime)
+		require.NoError(t, err)
+		assert.True(t, ap.isChannelsCacheExpired())
+	})
+
+	t.Run("never expired when TTL is 0", func(t *testing.T) {
+		ap.cacheTTL = 0
+		assert.False(t, ap.isChannelsCacheExpired())
+	})
+}
+
+// testLogger returns a no-op zap logger for tests.
+func testLogger() *zap.Logger {
+	return zap.NewNop()
 }
