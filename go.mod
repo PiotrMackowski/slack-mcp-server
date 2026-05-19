@@ -8,7 +8,7 @@ require (
 	github.com/mark3labs/mcp-go v0.49.0
 	github.com/mattn/go-isatty v0.0.22
 	github.com/openai/openai-go v1.12.0
-	github.com/slack-go/slack v0.23.0
+	github.com/slack-go/slack v0.23.1
 	github.com/stretchr/testify v1.11.1
 	github.com/takara2314/slack-go-util v0.4.1
 	go.uber.org/zap v1.28.0
