@@ -90,8 +90,9 @@ All write tools are disabled by default and must be explicitly enabled via envir
 | `conversations_add_message` | `SLACK_MCP_ADD_MESSAGE_TOOL` | Post messages. Set to `true`, channel IDs, or `!`-prefixed blocklist. |
 | `conversations_edit_message` | `SLACK_MCP_EDIT_MESSAGE_TOOL` | Edit messages. Same channel restriction syntax. |
 | `conversations_delete_message` | `SLACK_MCP_DELETE_MESSAGE_TOOL` | Delete messages. Same channel restriction syntax. |
-| `reactions_add` | `SLACK_MCP_ADD_MESSAGE_TOOL` | Add emoji reactions. Shares gate with add_message. |
-| `reactions_remove` | `SLACK_MCP_ADD_MESSAGE_TOOL` | Remove emoji reactions. Shares gate with add_message. |
+| `reactions_add` | `SLACK_MCP_REACTION_TOOL` | Add emoji reactions. Same channel restriction syntax. |
+| `reactions_remove` | `SLACK_MCP_REACTION_TOOL` | Remove emoji reactions. Same channel restriction syntax. |
+| `attachment_get_data` | `SLACK_MCP_ATTACHMENT_TOOL` | Download file/attachment content. Set to `true` or `1`. |
 | `conversations_mark` | `SLACK_MCP_MARK_TOOL` | Mark channel as read. Set to `true` or `1`. |
 | `usergroups_create` | `SLACK_MCP_USERGROUP_WRITE_TOOL` | Create user groups. Set to `true` or `1`. |
 | `usergroups_update` | `SLACK_MCP_USERGROUP_WRITE_TOOL` | Update user group metadata. |
@@ -111,14 +112,18 @@ All write tools are disabled by default and must be explicitly enabled via envir
 | `SLACK_MCP_CORS_ORIGIN` | No | — | Allowed CORS origin (SSE/HTTP). If unset, no CORS headers (same-origin only). |
 | `SLACK_MCP_PROXY` | No | — | Proxy URL for outgoing Slack API requests |
 | `SLACK_MCP_SERVER_CA` | No | — | Path to CA certificate for Slack API TLS verification |
-| `SLACK_MCP_ADD_MESSAGE_TOOL` | No | — | Enable posting/reactions. `true`, channel IDs, or `!`-prefixed blocklist. |
+| `SLACK_MCP_ADD_MESSAGE_TOOL` | No | — | Enable posting. `true`, channel IDs, or `!`-prefixed blocklist. |
 | `SLACK_MCP_ADD_MESSAGE_MARK` | No | — | Auto-mark sent messages as read when set to `true` |
 | `SLACK_MCP_ADD_MESSAGE_UNFURLING` | No | — | Enable link unfurling. `true` or comma-separated domain whitelist. |
 | `SLACK_MCP_EDIT_MESSAGE_TOOL` | No | — | Enable editing. Same syntax as add_message. |
 | `SLACK_MCP_DELETE_MESSAGE_TOOL` | No | — | Enable deletion. Same syntax as add_message. |
+| `SLACK_MCP_REACTION_TOOL` | No | — | Enable reactions. Same syntax as add_message. |
+| `SLACK_MCP_ATTACHMENT_TOOL` | No | — | Enable file/attachment download. `true` or `1`. |
 | `SLACK_MCP_USERGROUP_WRITE_TOOL` | No | — | Enable usergroup write tools. `true` or `1`. |
 | `SLACK_MCP_MARK_TOOL` | No | — | Enable mark-as-read. `true` or `1`. |
 | `SLACK_MCP_ENABLED_TOOLS` | No | — | Comma-separated tool whitelist. Overrides default registration. |
+| `SLACK_MCP_CACHE_TTL` | No | `1h` | Cache TTL for users/channels data. |
+| `SLACK_MCP_MIN_REFRESH_INTERVAL` | No | `30s` | Minimum interval between cache refreshes. |
 | `SLACK_MCP_USERS_CACHE` | No | OS default | Path to users cache JSON file |
 | `SLACK_MCP_CHANNELS_CACHE` | No | OS default | Path to channels cache JSON file |
 | `SLACK_MCP_LOG_LEVEL` | No | `info` | Log level: `debug`, `info`, `warn`, `error`, `panic`, `fatal` |
@@ -150,6 +155,7 @@ Compared to upstream `korotovsky/slack-mcp-server`:
 - **Removed**: `SLACK_MCP_SERVER_CA_INSECURE` (TLS verification bypass)
 - **Removed**: Demo mode, npm packaging, DXT extension, Docker distribution
 - **Removed**: slackdump/slackauth dependencies (playwright, go-rod, TUI libs)
+- **Removed**: `takara2314/slack-go-util` (single-maintainer dep, replaced with native Slack mrkdwn)
 - **Added**: Mandatory auth for SSE/HTTP transport (`SLACK_MCP_API_KEY`)
 - **Added**: TLS support for SSE/HTTP (`SLACK_MCP_TLS_CERT` / `SLACK_MCP_TLS_KEY`)
 - **Added**: CORS restriction (`SLACK_MCP_CORS_ORIGIN`)

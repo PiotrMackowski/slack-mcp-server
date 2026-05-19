@@ -22,7 +22,6 @@ import (
 	"github.com/korotovsky/slack-mcp-server/pkg/text"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/slack-go/slack"
-	slackGoUtil "github.com/takara2314/slack-go-util"
 	"go.uber.org/zap"
 )
 
@@ -238,14 +237,7 @@ func (ch *ConversationsHandler) ConversationsAddMessageHandler(ctx context.Conte
 		options = append(options, slack.MsgOptionDisableMarkdown())
 		options = append(options, slack.MsgOptionText(params.text, false))
 	case "text/markdown":
-		blocks, err := slackGoUtil.ConvertMarkdownTextToBlocks(params.text)
-		if err != nil {
-			ch.logger.Warn("Markdown parsing error", zap.Error(err))
-			options = append(options, slack.MsgOptionDisableMarkdown())
-			options = append(options, slack.MsgOptionText(params.text, false))
-		} else {
-			options = append(options, slack.MsgOptionBlocks(blocks...))
-		}
+		options = append(options, slack.MsgOptionText(params.text, false))
 	default:
 		return nil, errors.New("content_type must be either 'text/plain' or 'text/markdown'")
 	}
@@ -322,14 +314,7 @@ func (ch *ConversationsHandler) ConversationsEditMessageHandler(ctx context.Cont
 		options = append(options, slack.MsgOptionDisableMarkdown())
 		options = append(options, slack.MsgOptionText(params.text, false))
 	case "text/markdown":
-		blocks, err := slackGoUtil.ConvertMarkdownTextToBlocks(params.text)
-		if err != nil {
-			ch.logger.Warn("Markdown parsing error", zap.Error(err))
-			options = append(options, slack.MsgOptionDisableMarkdown())
-			options = append(options, slack.MsgOptionText(params.text, false))
-		} else {
-			options = append(options, slack.MsgOptionBlocks(blocks...))
-		}
+		options = append(options, slack.MsgOptionText(params.text, false))
 	default:
 		return nil, errors.New("content_type must be either 'text/plain' or 'text/markdown'")
 	}
