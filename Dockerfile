@@ -32,7 +32,7 @@ EXPOSE 3001
 ENTRYPOINT ["mcp-server"]
 CMD ["--transport", "sse"]
 
-FROM alpine:3.23 AS production
+FROM alpine:3.24 AS production
 
 RUN apk add --no-cache ca-certificates
 
