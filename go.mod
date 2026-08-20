@@ -5,23 +5,21 @@ go 1.25.7
 require (
 	github.com/gocarina/gocsv v0.0.0-20240520201108-78e41c74b4b1
 	github.com/google/uuid v1.6.0
-	github.com/mark3labs/mcp-go v0.56.0
-	github.com/mattn/go-isatty v0.0.23
+	github.com/mark3labs/mcp-go v0.58.0
+	github.com/mattn/go-isatty v0.0.24
 	github.com/openai/openai-go v1.12.0
-	github.com/slack-go/slack v0.27.0
-	github.com/stretchr/testify v1.11.1
+	github.com/slack-go/slack v0.29.0
+	github.com/stretchr/testify v1.12.0
 	go.uber.org/zap v1.28.0
-	golang.ngrok.com/ngrok/v2 v2.1.4
-	golang.org/x/net v0.57.0
+	golang.ngrok.com/ngrok/v2 v2.2.0
+	golang.org/x/net v0.58.0
 	golang.org/x/time v0.15.0
 )
 
 require (
-	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/google/jsonschema-go v0.4.2 // indirect
 	github.com/gorilla/websocket v1.5.3 // indirect
 	github.com/jpillora/backoff v1.0.0 // indirect
-	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.2 // indirect
 	github.com/spf13/cast v1.7.1 // indirect
 	github.com/tidwall/gjson v1.17.0 // indirect
@@ -32,7 +30,7 @@ require (
 	go.uber.org/multierr v1.11.0 // indirect
 	golang.ngrok.com/muxado/v2 v2.0.1 // indirect
 	golang.org/x/sys v0.47.0 // indirect
-	golang.org/x/text v0.40.0 // indirect
+	golang.org/x/text v0.41.0 // indirect
 	google.golang.org/protobuf v1.36.11 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
